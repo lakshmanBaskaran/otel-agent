@@ -113,155 +113,84 @@ pip install -qU deepagents langchain-anthropic   # or langchain-openai, etc.
 
 Set the relevant API key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`) and the Postgres connection string from the Quick start above.
 
-### 0.2 Minimal shape
+### 0.2 What you build
 
-```python
-from deepagents import create_deep_agent
-from deepagents.backends import FilesystemBackend
-from langgraph.checkpoint.memory import MemorySaver
-from langgraph.store.memory import InMemoryStore
-from langchain.tools import tool
+Your entry point is a single `create_deep_agent(...)` call that you assemble from
+the framework's building blocks — the model, your tools, a system prompt, your
+skills, a filesystem backend, and the memory / human-in-the-loop machinery.
+**Working out how these fit together from the documentation is part of the
+test**, so we don't hand you the wiring. The [Deep Agents
+docs](https://docs.langchain.com/oss/python/deepagents/overview) describe every
+parameter — build from those.
 
-@tool
-def run_sql(query: str) -> str:
-    """Run a read-only SQL query against the hotel_hackathon Postgres database."""
-    # connect to postgresql://hackathon:hackathon@localhost:5432/hotel_hackathon
-    # enforce read-only / row limits here, return rows as text or JSON
-    ...
+### 0.3 Concepts we expect you to use
 
-agent = create_deep_agent(
-    model="claude-sonnet-4-5-20250929",
-    tools=[run_sql],
-    system_prompt="You are a Revenue Manager Agent for a hotel GM. ...",
-    subagents=[...],                 # delegate specialised analysis
-    skills=["./skills/"],            # semantic layer + metric definitions as skills
-    backend=FilesystemBackend(root_dir=".", virtual_mode=True),
-    interrupt_on={"run_sql": False}, # gate sensitive/expensive tools if needed
-    checkpointer=MemorySaver(),      # required for interrupts + conversation memory
-    store=InMemoryStore(),           # long-term memory across threads
-)
-```
+Use **all** of these building blocks, and be ready to explain *why* you reached
+for each. We are not prescribing *how* — designing the solution is the point.
 
-### 0.3 Concepts we expect you to demonstrate
-
-Use **all** of these. Be ready to explain each choice in your demo.
-
-| Concept | What it is in Deep Agents | What we want to see for this challenge |
+| Concept | What it is in Deep Agents | What we're looking for |
 |---|---|---|
-| **Tools** | Custom `@tool` functions you pass to the agent | **Dedicated, typed, tested tools** — not a raw `run_sql`. See the design hint in 0.6: build tools like `revenue_on_the_books`, `booking_pickup`, `mix`, `adr`, `top_bookings` with typed arguments and structured returns, each wrapping one vetted query. |
-| **Skills** | On-demand `SKILL.md` files loaded via progressive disclosure (`skills=[...]` + a backend) | Build **two kinds** (see 0.7): (1) a **data-semantics** skill — metric definitions, grain, default filters; and (2) **revenue-manager reasoning skills** that teach the agent *how to think* — read pace, decompose drivers, judge risk, recommend action. The reasoning skills are the single biggest differentiator. |
-| **Subagents** | Specialised agents spawned via the built-in `task` tool (`subagents=[...]`) | Delegate focused jobs — e.g. a `sql-analyst` subagent that writes/validates queries, a `briefing-writer` subagent that turns numbers into GM-ready prose — each with isolated context. |
-| **Planning / TodoList** | Built-in `write_todos` tool (always on) | Let the agent decompose multi-part questions ("what's driving July?") into steps: identify metric → query → check cancellations → explain drivers. |
-| **Memory / Filesystem** | Virtual filesystem (`ls`, `read_file`, `write_file`, `glob`, `grep`) + pluggable backends; `Store` for long-term memory | Persist intermediate results, cache the schema, remember GM preferences and prior questions across turns (consistent `thread_id`). |
-| **Human-in-the-loop** | `interrupt_on={...}` to pause for approval (requires a `checkpointer`) | Gate anything sensitive or expensive (large scans, writes) behind an approval interrupt. |
-| **Model & system prompt** | `model=...`, `system_prompt=...` | A sharp GM-revenue-manager persona that enforces the answer style in Section 12. |
-| **MCP (bonus)** | Connect external tool servers via MCP | Optional: expose your SQL/analytics layer as an MCP server. |
+| **Tools** | Custom `@tool` functions you pass to the agent | A deliberately designed tool surface — you decide what the tools are, their arguments, and their return shapes (see the principle in 0.6). |
+| **Skills** | On-demand `SKILL.md` files loaded via progressive disclosure | Skills are the heart of this challenge (see 0.7). We judge their **depth and attention to detail** directly. |
+| **Subagents** | Specialised agents spawned via the built-in task tool | Delegate focused work to subagents with isolated context where it genuinely helps. |
+| **Planning** | Built-in todo / planning tooling | Let the agent decompose multi-part questions into ordered steps. |
+| **Memory / Filesystem** | Virtual filesystem + a long-term store | Persist intermediate work and hold a real multi-turn conversation. |
+| **Human-in-the-loop** | Approval interrupts | Gate anything sensitive or expensive behind an approval step. |
+| **Model & system prompt** | `model=...`, `system_prompt=...` | A sharp revenue-manager persona that holds the answer style in Section 12. |
+| **MCP (bonus)** | External tool servers via MCP | Optional. |
 
-### 0.4 Suggested project layout
+### 0.4 Skills use progressive disclosure
 
-```
-your-solution/
-├── agent.py                 # create_deep_agent() wiring
-├── tools/
-│   └── metrics.py           # dedicated, typed tools (see 0.6) — not raw run_sql
-├── tests/
-│   └── test_metrics.py      # unit-test every metric against known values
-├── skills/
-│   ├── revenue-semantics/SKILL.md
-│   ├── pickup-analysis/SKILL.md
-│   └── segment-mix/SKILL.md
-└── subagents/               # sql-analyst, briefing-writer, ...
-```
-
-Each `SKILL.md` **must** start with YAML frontmatter and a specific description:
-
-```markdown
----
-name: revenue-semantics
-description: Definitions and default filters for revenue, room nights, ADR, reservation count, and segment groupings in the hotel_hackathon dataset
----
-# Revenue Semantics
-## When to Use
-Whenever a question involves revenue, ADR, room nights, or "on the books".
-## Instructions
-- "On the books" = reservation_status = 'Reserved' (exclude Cancelled) on future stay_date ...
-- room nights = SUM(number_of_spaces) over stay rows ...
-```
+Each skill is a `SKILL.md` file with YAML frontmatter (at minimum `name` and a
+precise `description`) that the agent loads on demand — read the docs for the
+exact format. How you structure, name, scope, and write your skills is your
+decision, and is a large part of what we evaluate.
 
 ### 0.5 What scores well
 
-- Correct use of **at least Skills + Tools + Subagents + Planning + Memory**.
-- A **semantic layer expressed as skills** so metrics are defined once, not improvised per query.
-- Tools that make wrong answers hard (grain, cancellations, date choice, revenue field — see Section 8).
-- A clear demo where you can point at each Deep Agents concept and justify it.
+- Correct, deliberate use of **all** the building blocks in 0.3 — and the ability
+  to justify every choice.
+- **The depth and quality of your skills** (0.7). This is the single biggest
+  differentiator, and we probe it directly (see below).
+- A tool layer that makes wrong answers hard — correct grain, cancellations, and
+  the right date and revenue fields (see Sections 4–8).
+- Answers that read like a sharp revenue manager, not a dashboard (Section 12).
 
-> Tip: invoke with a consistent `config={"configurable": {"thread_id": "gm-session-1"}}` so the GM can have a real back-and-forth conversation.
+**How we test skill depth.** We will ask **deliberately hard questions** that a
+thin skill cannot answer well — questions that require correct decomposition, the
+right judgment call, awareness of a subtle trap in the data, or a non-obvious
+commercial recommendation. A surface-level skill produces a generic or wrong
+answer; a well-crafted one shows real revenue-management thinking. **Your skills
+are graded on what they actually make the agent capable of.**
 
-### 0.6 Design hint: dedicated, typed, tested tools — not raw `run_sql`
+### 0.6 Design principle: own your correctness (don't lean on raw `run_sql`)
 
-A single `run_sql(query)` tool is the easy path and the wrong one. It hands the
-model unbounded SQL: **you** lose control of correctness, and the agent can
-silently get the grain wrong (rows vs reservations), forget to exclude
-cancellations, or pick the wrong date field. The strongest solutions instead
-expose a **curated surface of dedicated tools**, where each tool:
+Handing the model a single `run_sql(query)` tool and letting it write arbitrary
+SQL is the easy path and a weak one: **you** lose control of correctness, and the
+model can silently get the grain wrong (rows vs reservations), forget to exclude
+cancellations, or pick the wrong date or revenue field. Strong solutions put
+correctness in **their own code** — a deliberately designed tool layer with the
+business rules baked in and **tested** — so the agent composes answers from
+trustworthy building blocks instead of improvising SQL. How you design that
+surface (what the tools are, their arguments, their return shapes, how you test
+them) is yours to decide, and is part of what we evaluate.
 
-- takes **typed arguments** the model can't get wrong — e.g. `Literal` enums and
-  ints, not free text:
-  ```python
-  @tool
-  def mix(dimension: Literal["market","macro_group","channel","room_type"],
-          metric: Literal["room_nights","revenue"] = "room_nights") -> str:
-      """Share breakdown of on-the-books business by a dimension."""
-  ```
-- **encapsulates one vetted query** with the business rules baked in (grain,
-  `reservation_status='Reserved'`, the correct date field) so the rule lives in
-  *your* code, tested once — not in a prompt you hope the model follows;
-- returns a **documented, structured payload** (and computes things like
-  cumulative concentration *in the tool*, so the model never has to do arithmetic
-  it can get wrong);
-- is **unit-tested** against known values, so you can prove each metric is right.
+### 0.7 The skills are the real test: teach the agent to *think* like a revenue manager
 
-A good starting tool surface: `revenue_on_the_books(group_by)`,
-`mix(dimension, metric)`, `booking_pickup(days)`, `adr(by)`,
-`cancellations(scope)`, `top_bookings(limit)`. The agent composes answers from
-these building blocks and never authors SQL — **you own correctness, not the
-model.** Keep a `run_sql` escape hatch if you must, but treat the dedicated tools
-as the real product. Demonstrating this design (with tests) scores well.
+Most teams will write a skill that defines metrics. That makes the agent
+*accurate*, not *insightful* — and it is not enough. What separates a strong
+submission is a set of skills that encode the **judgment of an experienced
+revenue manager**: not what the numbers are, but how to interpret them, what to
+compare against, what trap to avoid, and what to actually recommend.
 
-### 0.7 Special skills: teach the agent to *think* like a revenue manager
+We are deliberately **not** giving you the heuristics, the thresholds, or a list
+of skills to write. Discovering what an expert revenue manager actually knows —
+and encoding it with real attention to detail — *is the challenge.* This is where
+we spend most of our judging time, and where the hard questions in 0.5 are aimed.
 
-Most teams will write one skill that defines metrics. That is necessary but not
-sufficient — it makes the agent *accurate*, not *insightful*. The agents that
-stand out ship a second class of skill: **reasoning playbooks** that encode the
-judgment of an experienced revenue manager. These don't define numbers; they
-define *how to interpret them*.
-
-Think of two layers:
-
-| Skill type | Teaches | Example |
-|---|---|---|
-| **Data semantics** | What the numbers mean | `revenue-semantics` — grain, OTB, ADR, room nights, which date/revenue field |
-| **Reasoning playbooks** | How a revenue manager thinks | `pickup-and-pace`, `demand-drivers`, `commercial-actions` |
-
-What a good reasoning skill contains (not SQL — *thinking*):
-
-- **The real question behind the question** — "what's driving July" is really
-  "is it volume or rate, and is it durable?"; "how's pace" is "is the book
-  building faster or slower than it should, and where?".
-- **A decomposition discipline** — e.g. revenue = room nights × ADR, so always
-  attribute a move to volume vs rate vs mix vs cancellations, never just report it.
-- **Heuristics & thresholds** — "ADR down but revenue up is almost always mix,
-  not a price cut"; "top-10 bookings > ~50% of room nights = concentration risk";
-  "don't manufacture an OTA problem when the share is small".
-- **Which tools to reach for, and how to read the result.**
-- **The output register** — lead with the verdict, then 2–3 drivers, then the one
-  risk/opportunity, then a prioritised action tied to a number.
-
-Examples worth building: `pickup-and-pace`, `demand-drivers`,
-`concentration-risk`, `commercial-actions`, `morning-briefing`,
-`same-time-last-year`. A team that encodes genuine revenue-management reasoning
-here — so the agent gives commercial judgment, not a dashboard read aloud — is
-demonstrating exactly what this challenge is testing.
+A team that ships genuine revenue-management reasoning here — so the agent
+delivers commercial judgment, not a dashboard read aloud — is demonstrating
+exactly what this challenge is testing.
 
 ---
 
@@ -314,15 +243,28 @@ Send us:
 ### Deployment hints
 
 You need three things running and reachable: your **database**, your **agent
-backend**, and a **chat front-end** that talks to it.
+backend**, and a **front-end** that talks to it.
 
-- **Database:** a hosted Postgres (e.g. Supabase, Neon, Railway) is the easiest —
-  run your ETL once to fill it, and point your agent at it. (A local DB on your
-  laptop won't be reachable by a deployed app.)
-- **Agent + chat UI:** any simple hosting works — a small **Streamlit** or
-  **FastAPI + a basic HTML page**, a **Next.js** app, etc. Keep it minimal.
-- Make sure your **API key** (Anthropic/OpenAI) is set in the deployment's
-  environment — never commit it to the repo.
+- **Database:** a hosted Postgres (e.g. Supabase, Neon, Railway). Run your ETL
+  once to fill it; a DB on your laptop won't be reachable by a deployed app.
+- **API key:** set your model API key in the deployment environment — never
+  commit it.
+
+**Show your work in the UI.** We don't just want a final answer in a chat box —
+we want to **see the agent working**: for each question, which **tools** it
+called and which **skills** it loaded, streamed live as it runs. This is a strong
+positive signal, because it lets us watch the reasoning *route* — did the right
+skill fire, did it reach for the right tools. (Conveniently, in Deep Agents
+loading a skill is itself a file-read tool call, so a UI that surfaces tool calls
+shows skill usage too.) You do **not** need to expose the raw chain-of-thought —
+tool and skill activity is the signal we want.
+
+Because Deep Agents runs on **LangGraph**, the easiest path is to serve your agent
+as a LangGraph app and connect a ready-made UI that already renders streaming
+tool calls and subagent activity (e.g. the **deepagents UI** / **Agent Chat UI**)
+rather than hand-build one. A small custom front-end that streams tool/skill
+events is also fine. Plain **Streamlit** works but won't surface this detail well,
+so prefer a UI that shows tool and skill calls.
 
 ### Submission checklist
 
