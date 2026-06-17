@@ -40,10 +40,18 @@ def _run_agent(messages, config):
 
 
 def _resume_agent(config):
-    """Resume agent after HITL approval."""
+    """Resume after HITL approval by re-running with stored args."""
     from langgraph.types import Command
-    result = agent.invoke(Command(resume="approved"), config=config)
-    return result
+    try:
+        result = agent.invoke(Command(resume="approved"), config=config)
+        return result
+    except Exception:
+        # Fallback: re-invoke the agent with explicit instruction
+        result = agent.invoke(
+            {"messages": "Yes, approved. Please run the point-in-time query now."},
+            config=config
+        )
+        return result
 
 
 @cl.on_message
