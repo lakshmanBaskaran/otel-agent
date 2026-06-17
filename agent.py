@@ -2,6 +2,7 @@ import os
 from datetime import date
 from deepagents import create_deep_agent
 from deepagents.middleware.subagents import SubAgent
+from langgraph.checkpoint.memory import MemorySaver
 from tools import (
     ALL_TOOLS,
     get_otb_summary,
@@ -98,6 +99,7 @@ def build_agent():
         subagents=[segment_analyst, demand_analyst],
         memory=["./memory/AGENTS.md"],
         interrupt_on=interrupt_on,
+        checkpointer=MemorySaver(),
     )
     return agent
 
