@@ -1,0 +1,41 @@
+# Environment
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.venv/
+venv313/
+venv/
+.pytest_cache/
+-old/
+temp-brief/
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Local eval / metrics (NOT for submission)
+metrics.py
+evaluate.py
+evaluate_hard.py
+eval_results.json
+eval_hard_results.json
+
+# Logs
+*.log
+.chainlit/translations/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.egg-info/
+dist/
+build/

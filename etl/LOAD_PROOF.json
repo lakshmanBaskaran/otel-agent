@@ -1,0 +1,32 @@
+{
+  "version": 2,
+  "generated_at": "2026-06-14T23:01:23.746066+00:00",
+  "command": "scripts/compute_load_fingerprint.py --output etl/LOAD_PROOF.json",
+  "database_url_redacted": "postgresql://***:***@ep-noisy-frost-abppfjnj.eu-west-2.aws.neon.tech/neondb?sslmode=require",
+  "row_counts": {
+    "reservations_hackathon": 542,
+    "room_type_lookup": 3,
+    "rate_plan_lookup": 18,
+    "market_code_lookup": 10,
+    "market_macro_group_history": 11,
+    "channel_code_lookup": 4,
+    "load_manifest": 2
+  },
+  "reservation_stay_status_sha256": "da950a13c377457604338e9823100d4d641b409937f7515d79c9a41081ddc1dd",
+  "dataset_revision": "2026.06.12.2",
+  "load_manifest_row_hash": "ed31f217e7b21d9ab844df8ab59440aa58f80586d7f290fe0c6710ce94973323",
+  "load_manifest_scraped_at": "2026-06-14 22:48:45.795558+00",
+  "aggregates": {
+    "posted_stay_rows": 487,
+    "posted_reservations": 231,
+    "posted_otb_room_nights": 1168,
+    "provisional_row_count": 5,
+    "posted_room_revenue": 213544.0,
+    "active_room_nights": 1181,
+    "july_2025_posted_total_revenue": 25003.0,
+    "cancelled_reservation_count": 22,
+    "property_date_mismatch_count": 3
+  },
+  "verify_page_url": "https://otel-hackathon-data-site.vercel.app/verify",
+  "notes": "Compare row_counts and aggregates against the data site /verify page. dataset_revision must match the latest load_manifest row and the site."
+}
