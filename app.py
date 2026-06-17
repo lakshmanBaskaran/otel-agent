@@ -39,17 +39,14 @@ def _run_agent(messages, config):
 
 
 def _resume_agent(config):
-    """Resume after HITL approval."""
-    from langgraph.types import Command
-    try:
-        result = agent.invoke(Command(resume="approved"), config=config)
-        return result
-    except Exception:
-        result = agent.invoke(
-            {"messages": "Yes, approved. Please run the point-in-time query now."},
-            config=config
-        )
-        return result
+    """After HITL approval, re-run the original question."""
+    # Get the original question from session
+    original_question = cl.user_session.get("hitl_original_question", "")
+    result = agent.invoke(
+        {"messages": f"Please run get_as_of_otb now. {original_question}"},
+        config=config
+    )
+    return result, False, None
 
 
 @cl.on_message
