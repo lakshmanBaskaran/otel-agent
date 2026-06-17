@@ -2,6 +2,7 @@
 app.py - Chainlit UI for the Revenue Manager Agent.
 Handles HITL interrupts for get_as_of_otb.
 Uses ThreadPoolExecutor to avoid blocking the WebSocket.
+Session lock prevents race conditions on slow free-tier hosts.
 """
 import asyncio
 import json
@@ -29,8 +30,6 @@ def _run_agent(messages, config):
     """Run agent synchronously in thread. Returns (result, interrupted, interrupt_data)."""
     result = agent.invoke({"messages": messages}, config=config)
 
-    # Check if agent was interrupted (HITL)
-    # LangGraph sets __interrupt__ in the result when interrupted
     if isinstance(result, dict):
         interrupts = result.get("__interrupt__", [])
         if interrupts:
@@ -40,13 +39,12 @@ def _run_agent(messages, config):
 
 
 def _resume_agent(config):
-    """Resume after HITL approval by re-running with stored args."""
+    """Resume after HITL approval."""
     from langgraph.types import Command
     try:
         result = agent.invoke(Command(resume="approved"), config=config)
         return result
     except Exception:
-        # Fallback: re-invoke the agent with explicit instruction
         result = agent.invoke(
             {"messages": "Yes, approved. Please run the point-in-time query now."},
             config=config
@@ -59,67 +57,80 @@ async def main(message: cl.Message):
     session_id = cl.user_session.get("id", "default")
     config = {"configurable": {"thread_id": session_id}}
 
-    # Check if we're resuming a HITL interrupt
-    pending_hitl = cl.user_session.get("pending_hitl", False)
-
-    if pending_hitl:
-        user_response = message.content.strip().lower()
-        cl.user_session.set("pending_hitl", False)
-
-        if user_response in ("yes", "y", "approve", "ok", "go ahead", "confirm"):
-            thinking = cl.Message(content="✅ Approved. Running point-in-time query...")
-            await thinking.send()
-
-            loop = asyncio.get_event_loop()
-            try:
-                result = await loop.run_in_executor(
-                    executor,
-                    lambda: _resume_agent(config)
-                )
-            except Exception as e:
-                await thinking.remove()
-                await cl.Message(content=f"Error resuming: {str(e)}").send()
-                return
-
-            await thinking.remove()
-            await _send_result(result)
-        else:
-            await cl.Message(
-                content="Cancelled. The point-in-time query was not run. Ask me something else."
-            ).send()
-        return
-
-    # Normal message flow
-    thinking = cl.Message(content="⏳ Analysing...")
-    await thinking.send()
-
-    loop = asyncio.get_event_loop()
-    try:
-        result, interrupted, interrupt_data = await loop.run_in_executor(
-            executor,
-            lambda: _run_agent(message.content, config)
-        )
-    except Exception as e:
-        await thinking.remove()
-        await cl.Message(content=f"Error: {str(e)}").send()
-        return
-
-    await thinking.remove()
-
-    if interrupted:
-        # HITL gate fired — ask GM for approval
-        cl.user_session.set("pending_hitl", True)
+    # Prevent race conditions — one request at a time per session
+    if cl.user_session.get("processing", False):
         await cl.Message(
-            content=(
-                "⚠️ **Approval required**\n\n"
-                "I need to run a point-in-time database scan (`get_as_of_otb`). "
-                "This is an expensive query that reconstructs the book at a past timestamp.\n\n"
-                "**Type `yes` to approve or `no` to cancel.**"
-            )
+            content="⏳ Still processing previous request, please wait..."
         ).send()
         return
 
-    await _send_result(result)
+    cl.user_session.set("processing", True)
+
+    try:
+        pending_hitl = cl.user_session.get("pending_hitl", False)
+
+        # ── HITL resume path ──────────────────────────────────────────────
+        if pending_hitl:
+            user_response = message.content.strip().lower()
+            cl.user_session.set("pending_hitl", False)
+
+            if user_response in ("yes", "y", "approve", "ok", "go ahead", "confirm"):
+                thinking = cl.Message(content="✅ Approved. Running point-in-time query...")
+                await thinking.send()
+
+                loop = asyncio.get_event_loop()
+                try:
+                    result = await loop.run_in_executor(
+                        executor,
+                        lambda: _resume_agent(config)
+                    )
+                except Exception as e:
+                    await thinking.remove()
+                    await cl.Message(content=f"Error resuming: {str(e)}").send()
+                    return
+
+                await thinking.remove()
+                await _send_result(result)
+
+            else:
+                await cl.Message(
+                    content="Cancelled. The point-in-time query was not run. Ask me something else."
+                ).send()
+            return
+
+        # ── Normal message path ───────────────────────────────────────────
+        thinking = cl.Message(content="⏳ Analysing...")
+        await thinking.send()
+
+        loop = asyncio.get_event_loop()
+        try:
+            result, interrupted, interrupt_data = await loop.run_in_executor(
+                executor,
+                lambda: _run_agent(message.content, config)
+            )
+        except Exception as e:
+            await thinking.remove()
+            await cl.Message(content=f"Error: {str(e)}").send()
+            return
+
+        await thinking.remove()
+
+        if interrupted:
+            cl.user_session.set("pending_hitl", True)
+            await cl.Message(
+                content=(
+                    "⚠️ **Approval required**\n\n"
+                    "I need to run a point-in-time database scan (`get_as_of_otb`). "
+                    "This is an expensive query that reconstructs the book at a past timestamp.\n\n"
+                    "**Type `yes` to approve or `no` to cancel.**"
+                )
+            ).send()
+            return
+
+        await _send_result(result)
+
+    finally:
+        cl.user_session.set("processing", False)
 
 
 async def _send_result(result):
@@ -130,7 +141,6 @@ async def _send_result(result):
 
     messages = result["messages"]
 
-    # Show tool calls and skill loads
     for msg in messages:
         msg_type = type(msg).__name__
 
@@ -156,7 +166,6 @@ async def _send_result(result):
             async with step:
                 step.output = content
 
-    # Final AI response
     final = ""
     for msg in reversed(messages):
         if hasattr(msg, "content") and msg.content and type(msg).__name__ == "AIMessage":
@@ -198,7 +207,9 @@ try:
             posted = cur.fetchone()[0]
             conn.close()
         except Exception as e:
-            return JSONResponse({"status": "db_error", "error": str(e)}, status_code=500)
+            return JSONResponse(
+                {"status": "db_error", "error": str(e)}, status_code=500
+            )
 
         proof = {}
         p = Path("etl/LOAD_PROOF.json")
@@ -215,5 +226,6 @@ try:
                 "reservation_stay_status_sha256", "not_found"
             ),
         })
+
 except Exception:
     pass
