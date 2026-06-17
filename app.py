@@ -1,22 +1,29 @@
 """
 app.py - Chainlit UI for the Revenue Manager Agent.
 Handles HITL interrupts for get_as_of_otb.
-Uses ThreadPoolExecutor to avoid blocking the WebSocket.
-Session lock prevents race conditions on slow free-tier hosts.
+On approval: calls the tool directly (bypassing interrupt gate),
+then asks the agent to synthesize the result.
 """
 import asyncio
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 
 import chainlit as cl
 from agent import build_agent
+from tools import get_as_of_otb
 
 agent = build_agent()
 executor = ThreadPoolExecutor(max_workers=2)
 
 BASIC_AUTH_USER = os.environ.get("BASIC_AUTH_USER", "otel")
 BASIC_AUTH_PASS = os.environ.get("BASIC_AUTH_PASS", "revenue2026")
+
+# Store pending HITL state outside Chainlit context
+_pending_questions: dict = {}   # session_id -> original question
+_pending_tool_args: dict = {}   # session_id -> {stay_month, as_of_utc} extracted by agent
 
 
 @cl.password_auth_callback
@@ -27,26 +34,95 @@ def auth_callback(username: str, password: str):
 
 
 def _run_agent(messages, config):
-    """Run agent synchronously in thread. Returns (result, interrupted, interrupt_data)."""
+    """Run agent synchronously in thread.
+    Returns (result, interrupted, interrupt_data).
+    """
     result = agent.invoke({"messages": messages}, config=config)
 
     if isinstance(result, dict):
         interrupts = result.get("__interrupt__", [])
         if interrupts:
-            return result, True, interrupts[0] if interrupts else None
+            # Try to extract tool args from the interrupt data
+            interrupt = interrupts[0]
+            tool_args = {}
+            try:
+                if hasattr(interrupt, "value"):
+                    val = interrupt.value
+                    if isinstance(val, dict):
+                        tool_args = val.get("args", {})
+                    elif isinstance(val, list) and val:
+                        tool_args = val[0].get("args", {}) if isinstance(val[0], dict) else {}
+            except Exception:
+                pass
+            return result, True, tool_args
 
-    return result, False, None
+    return result, False, {}
 
 
-def _resume_agent(config):
-    """After HITL approval, re-run the original question."""
-    # Get the original question from session
-    original_question = cl.user_session.get("hitl_original_question", "")
-    result = agent.invoke(
-        {"messages": f"Please run get_as_of_otb now. {original_question}"},
-        config=config
+def _resume_agent(original_question, tool_args, config):
+    """Resume after HITL approval.
+    Calls get_as_of_otb directly (bypasses interrupt gate),
+    then asks a fresh agent instance to synthesize the result.
+    Runs entirely in a thread — no Chainlit context needed.
+    """
+    # Determine tool arguments
+    stay_month = tool_args.get("stay_month", "2026-07")
+    as_of_utc = tool_args.get("as_of_utc") or (
+        (datetime.now(timezone.utc) - timedelta(days=30))
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
     )
-    return result, False, None
+
+    # Step 1: Call tool directly — no agent, no interrupt gate
+    try:
+        tool_result = get_as_of_otb.invoke({
+            "stay_month": stay_month,
+            "as_of_utc": as_of_utc,
+        })
+    except Exception as e:
+        return {
+            "messages": [
+                type("AIMessage", (), {
+                    "content": f"Error running point-in-time query: {str(e)}",
+                    "tool_calls": None,
+                })()
+            ]
+        }, False, {}
+
+    # Step 2: Ask a fresh agent to synthesize — fresh thread_id avoids interrupt
+    fresh_config = {
+        "configurable": {
+            "thread_id": config["configurable"]["thread_id"] + f"_resume_{int(time.time())}"
+        }
+    }
+    synthesis_prompt = (
+        f"I have the point-in-time OTB data you requested. "
+        f"Here is what July looked like as of {as_of_utc}:\n\n"
+        f"{tool_result}\n\n"
+        f"Please answer this question using this data: {original_question}\n\n"
+        f"Compare to the current OTB if relevant, and give a sharp RM analysis."
+    )
+    result = agent.invoke({"messages": synthesis_prompt}, config=fresh_config)
+
+    # If fresh agent also triggers interrupt (shouldn't), just return tool data
+    if isinstance(result, dict) and result.get("__interrupt__"):
+        data = json.loads(tool_result)
+        summary = (
+            f"**July 2026 — Point-in-time snapshot as of {as_of_utc}**\n\n"
+            f"| Metric | Value |\n|---|---|\n"
+            f"| Reservations | {data.get('reservation_count', 'N/A')} |\n"
+            f"| Room Nights | {data.get('room_nights', 'N/A')} |\n"
+            f"| Total Revenue | £{data.get('total_revenue', 0):,.0f} |\n\n"
+            f"Compare to current OTB to see pickup since that date."
+        )
+        result = {"messages": [
+            type("FakeAI", (), {
+                "content": summary,
+                "tool_calls": None,
+                "__class__": type("cls", (), {"__name__": "AIMessage"})()
+            })()
+        ]}
+
+    return result, False, {}
 
 
 @cl.on_message
@@ -54,7 +130,7 @@ async def main(message: cl.Message):
     session_id = cl.user_session.get("id", "default")
     config = {"configurable": {"thread_id": session_id}}
 
-    # Prevent race conditions — one request at a time per session
+    # One request at a time per session
     if cl.user_session.get("processing", False):
         await cl.Message(
             content="⏳ Still processing previous request, please wait..."
@@ -72,26 +148,33 @@ async def main(message: cl.Message):
             cl.user_session.set("pending_hitl", False)
 
             if user_response in ("yes", "y", "approve", "ok", "go ahead", "confirm"):
-                thinking = cl.Message(content="✅ Approved. Running point-in-time query...")
+                thinking = cl.Message(
+                    content="✅ Approved. Running point-in-time query..."
+                )
                 await thinking.send()
+
+                original_question = _pending_questions.pop(session_id, "point-in-time OTB")
+                tool_args = _pending_tool_args.pop(session_id, {})
 
                 loop = asyncio.get_event_loop()
                 try:
-                    result = await loop.run_in_executor(
+                    result, _, __ = await loop.run_in_executor(
                         executor,
-                        lambda: _resume_agent(config)
+                        lambda: _resume_agent(original_question, tool_args, config),
                     )
                 except Exception as e:
                     await thinking.remove()
-                    await cl.Message(content=f"Error resuming: {str(e)}").send()
+                    await cl.Message(content=f"Error: {str(e)}").send()
                     return
 
                 await thinking.remove()
                 await _send_result(result)
 
             else:
+                _pending_questions.pop(session_id, None)
+                _pending_tool_args.pop(session_id, None)
                 await cl.Message(
-                    content="Cancelled. The point-in-time query was not run. Ask me something else."
+                    content="Cancelled. Ask me something else."
                 ).send()
             return
 
@@ -101,9 +184,9 @@ async def main(message: cl.Message):
 
         loop = asyncio.get_event_loop()
         try:
-            result, interrupted, interrupt_data = await loop.run_in_executor(
+            result, interrupted, tool_args = await loop.run_in_executor(
                 executor,
-                lambda: _run_agent(message.content, config)
+                lambda: _run_agent(message.content, config),
             )
         except Exception as e:
             await thinking.remove()
@@ -113,12 +196,15 @@ async def main(message: cl.Message):
         await thinking.remove()
 
         if interrupted:
+            _pending_questions[session_id] = message.content
+            _pending_tool_args[session_id] = tool_args
             cl.user_session.set("pending_hitl", True)
             await cl.Message(
                 content=(
                     "⚠️ **Approval required**\n\n"
                     "I need to run a point-in-time database scan (`get_as_of_otb`). "
-                    "This is an expensive query that reconstructs the book at a past timestamp.\n\n"
+                    "This is an expensive query that reconstructs the book "
+                    "at a past timestamp.\n\n"
                     "**Type `yes` to approve or `no` to cancel.**"
                 )
             ).send()
@@ -131,7 +217,7 @@ async def main(message: cl.Message):
 
 
 async def _send_result(result):
-    """Extract tool calls and final response from agent result and send to UI."""
+    """Extract tool calls and final response from agent result."""
     if not isinstance(result, dict) or "messages" not in result:
         await cl.Message(content=str(result)).send()
         return
@@ -165,7 +251,11 @@ async def _send_result(result):
 
     final = ""
     for msg in reversed(messages):
-        if hasattr(msg, "content") and msg.content and type(msg).__name__ == "AIMessage":
+        if (
+            hasattr(msg, "content")
+            and msg.content
+            and type(msg).__name__ == "AIMessage"
+        ):
             if not (hasattr(msg, "tool_calls") and msg.tool_calls):
                 final = msg.content
                 break
@@ -185,7 +275,10 @@ try:
 
     @chainlit_app.get("/health")
     def health():
-        db_url = os.environ.get("HOTEL_DATABASE_URL") or os.environ.get("DATABASE_URL")
+        db_url = (
+            os.environ.get("HOTEL_DATABASE_URL")
+            or os.environ.get("DATABASE_URL")
+        )
         try:
             conn = psycopg2.connect(db_url)
             cur = conn.cursor()
