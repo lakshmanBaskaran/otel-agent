@@ -6,8 +6,7 @@ from zoneinfo import ZoneInfo
 import psycopg2
 from langchain_core.tools import tool
 
-DB_CONN = os.environ.get("HOTEL_DATABASE_URL",
-    "postgresql://neondb_owner:npg_frN6GqcsOBi9@ep-noisy-frost-abppfjnj.eu-west-2.aws.neon.tech/neondb?sslmode=require")
+DB_CONN = os.environ["HOTEL_DATABASE_URL"]
 
 LONDON_TZ = ZoneInfo("Europe/London")
 
@@ -40,7 +39,6 @@ def get_otb_summary(stay_month: str, exclude_cancelled: bool = True) -> str:
     cur = conn.cursor()
 
     if exclude_cancelled:
-        # Default OTB: Posted + non-cancelled (via view)
         cur.execute("""
             SELECT COUNT(*) AS row_count,
                    COUNT(DISTINCT reservation_id) AS reservation_count,
@@ -51,7 +49,6 @@ def get_otb_summary(stay_month: str, exclude_cancelled: bool = True) -> str:
             WHERE TO_CHAR(stay_date, 'YYYY-MM') = %s
         """, (stay_month,))
     else:
-        # Include cancelled but still exclude provisional
         cur.execute("""
             SELECT COUNT(*) AS row_count,
                    COUNT(DISTINCT reservation_id) AS reservation_count,
@@ -169,7 +166,6 @@ def get_pickup_delta(booking_window_days: int, future_stay_from: str) -> str:
     conn = get_conn()
     cur = conn.cursor()
 
-    # Europe/London midnight N days ago, converted to UTC
     now_london = datetime.now(LONDON_TZ)
     window_start_london = (now_london - timedelta(days=booking_window_days)).replace(
         hour=0, minute=0, second=0, microsecond=0)
@@ -187,7 +183,6 @@ def get_pickup_delta(booking_window_days: int, future_stay_from: str) -> str:
     row = cur.fetchone()
     new_res, new_rn, new_rev = row[0], row[1], float(row[2])
 
-    # Top segments by revenue
     cur.execute("""
         SELECT v.market_code,
                COALESCE(SUM(v.number_of_spaces), 0) AS room_nights,
@@ -309,7 +304,7 @@ def get_block_vs_transient_mix(stay_month: str) -> str:
     block_rn, block_rev = 0, 0.0
     trans_rn, trans_rev = 0, 0.0
     for row in cur.fetchall():
-        if row[0]:  # is_block = true
+        if row[0]:
             block_rn, block_rev = row[1], float(row[2])
         else:
             trans_rn, trans_rev = row[1], float(row[2])
@@ -317,7 +312,6 @@ def get_block_vs_transient_mix(stay_month: str) -> str:
     total_rn = block_rn + trans_rn or 1
     total_rev = block_rev + trans_rev or 1.0
 
-    # Top 3 companies by revenue (null company -> 'Transient')
     cur.execute("""
         SELECT COALESCE(company_name, 'Transient') AS company,
                COALESCE(SUM(daily_total_revenue_before_tax), 0) AS revenue

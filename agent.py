@@ -13,6 +13,7 @@ from tools import (
     get_room_type_performance,
     get_top_companies,
 )
+
 TODAY = date.today().isoformat()
 
 SYSTEM_PROMPT = f"""You are the Revenue Manager for the Grand Harbour Hotel.
@@ -28,10 +29,26 @@ Start with the headline. Show the key numbers. Say what's driving them.
 Be transparent about risks and negatives. End with what to actually do.
 Note your assumptions if they matter.
 
-## When to delegate
-- Segment or block mix questions → segment-analyst subagent
-- Pickup or pace questions → demand-analyst subagent
-- Morning briefing → both subagents, then synthesize
+## Exact tool routing — follow this exactly, no exceptions
+
+Call tools DIRECTLY. Do NOT delegate to subagents except for morning briefing.
+
+| Question type | Tools to call |
+|---|---|
+| OTB / revenue on books | get_otb_summary |
+| Segment mix / what is driving | get_segment_mix, get_block_vs_transient_mix |
+| OTA dependency / channel mix | get_segment_mix |
+| Block vs transient | get_block_vs_transient_mix |
+| Top companies / account concentration | get_top_companies |
+| Room type ADR | get_room_type_performance |
+| Pickup / pace / what changed | get_pickup_delta |
+| Month comparison (July vs August) | get_pickup_delta twice |
+| Point-in-time / historical OTB | get_as_of_otb (HITL gated) |
+| Morning briefing | delegate to BOTH subagents, then synthesize |
+
+Call ONLY the tools listed for the question type. Do not call extra tools
+to be thorough. Do not call get_otb_summary as context unless headline
+numbers are explicitly requested alongside another question.
 
 ## Critical data rules
 - Room nights = SUM(number_of_spaces), never COUNT(*)
@@ -46,21 +63,23 @@ Confident, concise, commercial. Round numbers. Take a position.
 
 SEGMENT_ANALYST_PROMPT = """You are the Segment Analyst on the revenue team.
 
-Your job is to break down the business mix — which segments drive revenue,
-where concentration sits, and how block vs transient splits.
+You are called only for morning briefings. Your job:
+1. Call get_segment_mix for the current month
+2. Call get_block_vs_transient_mix for the current month
+3. Synthesize and return findings
 
-Use get_segment_mix for market-level breakdown and get_block_vs_transient_mix
-for block analysis. Always state shares as percentages. Flag any single
-segment or company taking an outsized share.
+Call exactly those 2 tools. Do not call get_otb_summary.
+Do not call get_top_companies. Do not create tasks. Answer directly.
 """
 
 DEMAND_ANALYST_PROMPT = """You are the Demand Analyst on the revenue team.
 
-Your job is to read booking momentum. Use get_pickup_delta to check recent
-booking pace. Compare pickup volume and ADR across months. Flag months
-with weak pickup that are close to arrival.
+You are called only for morning briefings. Your job:
+1. Call get_pickup_delta with booking_window_days=7
+2. Call get_otb_summary for the nearest future month for context
 
-Always pair pickup with the current OTB position for context.
+Call exactly those 2 tools. Do not call additional pickup windows.
+Do not create tasks. Answer directly.
 """
 
 
@@ -68,25 +87,27 @@ def build_agent():
     segment_analyst = SubAgent(
         name="segment-analyst",
         description=(
-            "Specialist in segment and block mix analysis. Use for questions about "
-            "what's driving a month, segment breakdown, OTA dependency, group vs "
-            "transient, or company concentration."
+            "Use ONLY for morning briefing requests. "
+            "Handles segment mix and block/transient breakdown. "
+            "Do NOT use for standalone segment, OTA, or company questions — "
+            "the supervisor handles those directly."
         ),
         system_prompt=SEGMENT_ANALYST_PROMPT,
-        tools=[get_segment_mix, get_block_vs_transient_mix, get_top_companies, get_otb_summary],
+        tools=[get_segment_mix, get_block_vs_transient_mix, get_otb_summary],
     )
 
     demand_analyst = SubAgent(
         name="demand-analyst",
         description=(
-            "Specialist in booking pace and pickup. Use for questions about "
-            "what changed recently, pickup trends, or booking momentum."
+            "Use ONLY for morning briefing requests. "
+            "Handles pickup pace and booking momentum. "
+            "Do NOT use for standalone pickup or pacing questions — "
+            "the supervisor handles those directly."
         ),
         system_prompt=DEMAND_ANALYST_PROMPT,
         tools=[get_pickup_delta, get_otb_summary],
     )
 
-    # HITL: gate get_as_of_otb — expensive point-in-time rebuild
     interrupt_on = {
         "get_as_of_otb": True,
     }
@@ -104,20 +125,32 @@ def build_agent():
     return agent
 
 
+def make_config(session_id: str) -> dict:
+    return {"configurable": {"thread_id": session_id}}
+
+
 if __name__ == "__main__":
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print("Set ANTHROPIC_API_KEY first")
         exit(1)
 
+    import uuid
     agent = build_agent()
     print(f"Revenue Manager Agent ready ({TODAY})")
-    print("Type a question or 'quit'\n")
+    print("Commands: 'quit' to exit, 'new' for fresh context\n")
 
-    config = {"configurable": {"thread_id": "main"}}
+    session_id = str(uuid.uuid4())
+    config = make_config(session_id)
+
     while True:
         q = input("GM> ").strip()
         if q.lower() in ("quit", "exit", "q"):
             break
+        if q.lower() == "new":
+            session_id = str(uuid.uuid4())
+            config = make_config(session_id)
+            print("[New context window]\n")
+            continue
         if not q:
             continue
         print("\nAnalyzing...\n")

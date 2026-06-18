@@ -3,6 +3,8 @@ app.py - Chainlit UI for the Revenue Manager Agent.
 Handles HITL interrupts for get_as_of_otb.
 On approval: calls the tool directly (bypassing interrupt gate),
 then asks the agent to synthesize the result.
+Context accumulation fix: each Chainlit session uses its own thread_id.
+Follow-up questions within a session retain context.
 """
 import asyncio
 import json
@@ -12,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import chainlit as cl
-from agent import build_agent
+from agent import build_agent, make_config
 from tools import get_as_of_otb
 
 agent = build_agent()
@@ -23,7 +25,7 @@ BASIC_AUTH_PASS = os.environ.get("BASIC_AUTH_PASS", "revenue2026")
 
 # Store pending HITL state outside Chainlit context
 _pending_questions: dict = {}   # session_id -> original question
-_pending_tool_args: dict = {}   # session_id -> {stay_month, as_of_utc} extracted by agent
+_pending_tool_args: dict = {}   # session_id -> {stay_month, as_of_utc}
 
 
 @cl.password_auth_callback
@@ -35,14 +37,13 @@ def auth_callback(username: str, password: str):
 
 def _run_agent(messages, config):
     """Run agent synchronously in thread.
-    Returns (result, interrupted, interrupt_data).
+    Returns (result, interrupted, tool_args).
     """
     result = agent.invoke({"messages": messages}, config=config)
 
     if isinstance(result, dict):
         interrupts = result.get("__interrupt__", [])
         if interrupts:
-            # Try to extract tool args from the interrupt data
             interrupt = interrupts[0]
             tool_args = {}
             try:
@@ -65,7 +66,6 @@ def _resume_agent(original_question, tool_args, config):
     then asks a fresh agent instance to synthesize the result.
     Runs entirely in a thread — no Chainlit context needed.
     """
-    # Determine tool arguments
     stay_month = tool_args.get("stay_month", "2026-07")
     as_of_utc = tool_args.get("as_of_utc") or (
         (datetime.now(timezone.utc) - timedelta(days=30))
@@ -88,26 +88,24 @@ def _resume_agent(original_question, tool_args, config):
             ]
         }, False, {}
 
-    # Step 2: Ask a fresh agent to synthesize — fresh thread_id avoids interrupt
-    fresh_config = {
-        "configurable": {
-            "thread_id": config["configurable"]["thread_id"] + f"_resume_{int(time.time())}"
-        }
-    }
+    # Step 2: Fresh thread_id for synthesis — avoids re-triggering interrupt
+    session_id = config["configurable"]["thread_id"]
+    fresh_config = make_config(f"{session_id}_resume_{int(time.time())}")
+
     synthesis_prompt = (
         f"I have the point-in-time OTB data you requested. "
-        f"Here is what July looked like as of {as_of_utc}:\n\n"
+        f"Here is what the book looked like as of {as_of_utc}:\n\n"
         f"{tool_result}\n\n"
         f"Please answer this question using this data: {original_question}\n\n"
         f"Compare to the current OTB if relevant, and give a sharp RM analysis."
     )
     result = agent.invoke({"messages": synthesis_prompt}, config=fresh_config)
 
-    # If fresh agent also triggers interrupt (shouldn't), just return tool data
+    # Fallback if fresh agent also triggers interrupt
     if isinstance(result, dict) and result.get("__interrupt__"):
         data = json.loads(tool_result)
         summary = (
-            f"**July 2026 — Point-in-time snapshot as of {as_of_utc}**\n\n"
+            f"**Point-in-time snapshot as of {as_of_utc}**\n\n"
             f"| Metric | Value |\n|---|---|\n"
             f"| Reservations | {data.get('reservation_count', 'N/A')} |\n"
             f"| Room Nights | {data.get('room_nights', 'N/A')} |\n"
@@ -128,7 +126,9 @@ def _resume_agent(original_question, tool_args, config):
 @cl.on_message
 async def main(message: cl.Message):
     session_id = cl.user_session.get("id", "default")
-    config = {"configurable": {"thread_id": session_id}}
+    # Each Chainlit session has its own thread_id — follow-up questions
+    # within the same session retain context. New login = new session = fresh context.
+    config = make_config(session_id)
 
     # One request at a time per session
     if cl.user_session.get("processing", False):

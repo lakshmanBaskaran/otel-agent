@@ -1,11 +1,4 @@
-"""
-health_server.py - Standalone /health endpoint required by the brief.
 
-Returns the DB fingerprint + dataset revision so the reviewer can confirm
-the live agent is reading the same database the LOAD_PROOF was generated from.
-
-This runs as a separate FastAPI process alongside Chainlit.
-"""
 import hashlib
 import json
 import os
@@ -16,8 +9,7 @@ from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
 
-DB_CONN = os.environ.get("HOTEL_DATABASE_URL",
-    "postgresql://neondb_owner:npg_frN6GqcsOBi9@ep-noisy-frost-abppfjnj.eu-west-2.aws.neon.tech/neondb?sslmode=require")
+DB_CONN = os.environ.get("HOTEL_DATABASE_URL")
 
 
 def get_conn():

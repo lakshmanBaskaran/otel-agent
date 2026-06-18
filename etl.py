@@ -9,8 +9,7 @@ import psycopg2
 from psycopg2.extras import execute_values
 from playwright.async_api import async_playwright
 
-DB_CONN = os.environ.get("DATABASE_URL",
-    "postgresql://neondb_owner:npg_frN6GqcsOBi9@ep-noisy-frost-abppfjnj.eu-west-2.aws.neon.tech/neondb?sslmode=require")
+DB_CONN = os.environ["DATABASE_URL"]
 BASE_URL = "https://otel-hackathon-data-site.vercel.app"
 
 KNOWN_FIELDS = [
@@ -22,8 +21,6 @@ KNOWN_FIELDS = [
     "company_name", "travel_agent_name"
 ]
 
-
-# ─── EXTRACT ───────────────────────────────────────────────────────────────────
 
 async def scrape_dataset_revision(page):
     await page.goto(f"{BASE_URL}/reference", timeout=60000)
@@ -163,8 +160,6 @@ async def scrape_reservation_detail(page, res_id):
     return combined
 
 
-# ─── TRANSFORM ─────────────────────────────────────────────────────────────────
-
 def safe_int(val, default=0):
     try: return int(val) if val not in (None, "", "\u2014") else default
     except (ValueError, TypeError): return default
@@ -210,8 +205,6 @@ def transform_row(raw):
         "travel_agent_name": safe_nullable(raw.get("travel_agent_name")),
     }
 
-
-# ─── LOAD ──────────────────────────────────────────────────────────────────────
 
 def load_lookups(conn, room_types, market_codes, channel_codes, rate_plans, macro_history):
     cur = conn.cursor()
@@ -259,7 +252,6 @@ def load_lookups(conn, room_types, market_codes, channel_codes, rate_plans, macr
 
 
 def backfill_missing_rate_plans(conn, rows):
-    """Insert any rate_plan_codes found in reservations but missing from lookup."""
     cur = conn.cursor()
     all_codes = set(r["rate_plan_code"] for r in rows if r["rate_plan_code"])
     cur.execute("SELECT rate_plan_code FROM rate_plan_lookup")
@@ -342,8 +334,6 @@ def create_views(conn):
     print("  Views created")
 
 
-# ─── MANIFEST ──────────────────────────────────────────────────────────────────
-
 def generate_scrape_manifest(res_ids, pages_scraped, anchor_date):
     sorted_ids = sorted(res_ids)
     ids_text = "\n".join(sorted_ids)
@@ -360,8 +350,6 @@ def generate_scrape_manifest(res_ids, pages_scraped, anchor_date):
     print(f"  SCRAPE_MANIFEST.json saved ({len(sorted_ids)} IDs, SHA: {sha256[:16]}...)")
     return sha256
 
-
-# ─── VERIFY ────────────────────────────────────────────────────────────────────
 
 def verify(conn):
     cur = conn.cursor()
@@ -416,8 +404,6 @@ def verify(conn):
     print(f"channel_code_lookup          : {cc:>8}")
     print(f"{'='*60}\n")
 
-
-# ─── MAIN ──────────────────────────────────────────────────────────────────────
 
 async def main():
     anchor_date = datetime.now().strftime("%Y-%m-%d")

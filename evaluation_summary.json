@@ -1,0 +1,16 @@
+{
+  "tests_run": 20,
+  "successes": 20,
+  "failures": 0,
+  "success_rate": 100.0,
+  "average_latency": 24.1,
+  "tool_usage": {
+    "get_segment_mix": 10,
+    "get_block_vs_transient_mix": 4,
+    "get_top_companies": 1,
+    "get_pickup_delta": 13,
+    "get_otb_summary": 17,
+    "task": 6,
+    "get_room_type_performance": 5
+  }
+}
