@@ -1,8 +1,4 @@
-"""
-tests/test_skills.py — Skill structure tests (Phase 3)
-Covers scenarios 1-6 from SKILL_TEST_SCENARIOS.md.
-No LLM calls — filesystem and content checks only.
-"""
+
 import os
 import re
 import glob
@@ -44,7 +40,6 @@ def get_all_skills():
     return paths
 
 
-# ─── Scenario 1: Pack version pin ─────────────────────────────────────────────
 
 def test_challenge_skill_exists():
     path = os.path.join(SKILLS_DIR, "CHALLENGE_SKILL.md")
@@ -59,7 +54,7 @@ def test_challenge_skill_version():
     assert "otel-rm-v2" in desc, f"CHALLENGE_SKILL.md description must contain 'otel-rm-v2', got: {desc}"
 
 
-# ─── Scenario 2: Minimum skill count ──────────────────────────────────────────
+
 
 def test_minimum_skill_count():
     skills = get_all_skills()
@@ -72,10 +67,10 @@ def test_all_skills_have_frontmatter():
         assert fm.get("description"), f"{os.path.basename(path)} missing 'description' in frontmatter"
 
 
-# ─── Scenario 3: Judgment -old ──────────────────────────────────────────────
+
 
 def test_judgment_skills_count():
-    """At least 3 skills have a numeric threshold AND a recommended action AND >= 80 words body."""
+
     judgment_count = 0
     for path in get_all_skills():
         fm, body, content = load_skill(path)
@@ -87,10 +82,8 @@ def test_judgment_skills_count():
     assert judgment_count >= 3, f"Need at least 3 judgment skills (threshold+action+80 words), found {judgment_count}"
 
 
-# ─── Scenario 4: Tool routing declared ────────────────────────────────────────
-
 def test_skills_reference_required_tools():
-    """Every skill names at least one required tool."""
+
     for path in get_all_skills():
         fm, body, content = load_skill(path)
         full_text = (fm.get("description", "") + " " + body).lower()
@@ -98,7 +91,7 @@ def test_skills_reference_required_tools():
         assert has_tool, f"{os.path.basename(path)} does not reference any required tool"
 
 def test_no_skill_instructs_raw_sql():
-    """No skill tells the model to run raw SQL or query reservations_hackathon."""
+
     for path in get_all_skills():
         fm, body, content = load_skill(path)
         lower = content.lower()
@@ -107,7 +100,7 @@ def test_no_skill_instructs_raw_sql():
             f"{os.path.basename(path)} references raw SQL on reservations_hackathon"
 
 
-# ─── Scenario 5: Distinct routing ─────────────────────────────────────────────
+
 
 def test_no_duplicate_skill_names():
     names = []
@@ -124,7 +117,7 @@ def test_no_duplicate_descriptions():
     assert len(descs) == len(set(descs)), "Duplicate skill descriptions found"
 
 def test_covers_otb_pickup_mix():
-    """At least one skill targets OTB, one pickup, one segment mix."""
+
     all_text = ""
     for path in get_all_skills():
         fm, body, content = load_skill(path)
@@ -134,10 +127,9 @@ def test_covers_otb_pickup_mix():
     assert "get_segment_mix" in all_text, "No skill targets segment mix"
 
 
-# ─── Scenario 6: Adversarial guardrail ────────────────────────────────────────
+
 
 def test_at_least_one_trap_warning():
-    """At least one skill warns against a known trap."""
     traps = ["row", "rows vs", "reservation", "property_date", "provisional",
              "cancelled", "count(*)", "grain", "stay_date"]
     for path in get_all_skills():

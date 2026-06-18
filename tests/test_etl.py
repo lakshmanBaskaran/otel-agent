@@ -1,8 +1,4 @@
-"""
-tests/test_etl.py — ETL property tests (Phase 1)
-Covers scenarios 1-4 from ETL_TEST_SCENARIOS.md.
-Requires a loaded database (run etl.py first).
-"""
+
 import json
 import os
 import psycopg2
@@ -21,8 +17,6 @@ def conn():
 def cur(conn):
     return conn.cursor()
 
-
-# ─── Scenario 1: Lookup row counts ─────────────────────────────────────────────
 
 def test_room_type_lookup_count(cur):
     cur.execute("SELECT COUNT(*) FROM room_type_lookup")
@@ -57,7 +51,7 @@ def test_rate_plan_lookup_has_reference_plans(cur):
 # ─── Scenario 2: Fact-table grain uniqueness ───────────────────────────────────
 
 def test_no_duplicate_reservation_stay_date(cur):
-    # Grain: one row per (reservation_id, stay_date). No duplicates.
+
     cur.execute("""
         SELECT reservation_id, stay_date, COUNT(*)
         FROM reservations_hackathon
@@ -68,7 +62,7 @@ def test_no_duplicate_reservation_stay_date(cur):
     assert len(dupes) == 0, f"Found {len(dupes)} duplicate (reservation_id, stay_date) pairs: {dupes[:5]}"
 
 def test_unique_constraint_exists(cur):
-    # Verify the UNIQUE constraint is in the schema
+
     cur.execute("""
         SELECT COUNT(*) FROM information_schema.table_constraints
         WHERE table_name = 'reservations_hackathon'
@@ -77,7 +71,7 @@ def test_unique_constraint_exists(cur):
     assert cur.fetchone()[0] >= 1, "Missing UNIQUE constraint on reservations_hackathon"
 
 
-# ─── Scenario 3: Manifest and verify reconciliation ───────────────────────────
+
 
 def test_manifest_reservation_count(cur):
     manifest_path = os.path.join(os.path.dirname(__file__), "..", "etl", "SCRAPE_MANIFEST.json")
@@ -103,8 +97,6 @@ def test_load_manifest_dataset_revision(cur):
     # Should be a non-empty revision string
     assert len(row[0]) > 0, "dataset_revision is empty"
 
-
-# ─── Scenario 4 (bonus): Stay row expansion ───────────────────────────────────
 
 def test_multi_night_stay_row_expansion(cur):
     # Find a multi-night reservation and verify row count matches nights
