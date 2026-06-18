@@ -154,23 +154,7 @@ pytest tests/ -v
 
 ## Design highlights
 
-See `ENGINEERING_DECISIONS.md` for the full set. Headlines:
-
-- **Own your correctness** — all SQL hardcoded in Python tools, LLM passes only typed parameters. No `run_sql`.
-- **Grain rules everywhere** — every tool docstring states grain (rows vs reservations vs room nights).
-- **Europe/London midnight** for pickup windows, UTC for storage.
-- **Effective macro_group** via `market_macro_group_history` LATERAL join (handles PROM mid-year reclassification).
-- **HITL on get_as_of_otb** — expensive point-in-time queries require approval before execution.
-- **Skills encode judgment, not metrics** — thresholds with reasoning, recommendations by pattern, traps to avoid.
-- **Industry-heuristic thresholds with calibration note** — committed to specific numbers, documented as starting heuristics in ARCHITECTURE.md.
-
+See `ARCHITECTURE.md` for the full design choices and justification of those choices.
 ---
 
-## Notes for the reviewer
 
-- `metrics.py` and `evaluate*.py` are NOT in this repo — they are a local
-  evaluation harness with parallel ground-truth calculation, kept out of
-  submission to avoid the "grading yourself with your own answer key" trap.
-- `etl/LOAD_PROOF.json` is committed; `/health` endpoint returns the live
-  fingerprint for verification.
-- ETL is idempotent (truncate-and-reload). `load_manifest` records every run.
