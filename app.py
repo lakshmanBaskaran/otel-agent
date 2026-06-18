@@ -294,54 +294,10 @@ try:
         payload = "\n".join(lines).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
+
     @chainlit_app.get("/healthotel")
     def health():
-        try:
-            conn = _get_health_conn()
-            try:
-                live_fingerprint = _compute_live_fingerprint(conn)
-
-                cur = conn.cursor()
-                cur.execute(
-                    """
-                    SELECT dataset_revision, row_hash
-                    FROM load_manifest
-                    ORDER BY load_id DESC
-                    LIMIT 1
-                    """
-                )
-                row = cur.fetchone()
-
-                cur.execute(
-                    """
-                    SELECT COUNT(*) FROM reservations_hackathon
-                    WHERE financial_status = 'Posted'
-                      AND reservation_status != 'Cancelled'
-                    """
-                )
-                posted = cur.fetchone()[0]
-            finally:
-                conn.close()
-        except Exception as e:
-            return JSONResponse(
-                {"status": "db_error", "error": str(e)}, status_code=500
-            )
-
-        proof = _load_proof_data()
-
-        return JSONResponse({
-            "status": "ok",
-            "db_fingerprint": live_fingerprint,
-            "db_fingerprint_matches_proof": (
-                live_fingerprint == proof.get("reservation_stay_status_sha256")
-            ),
-            "dataset_revision": row[0] if row else None,
-            "row_hash": row[1] if row else None,
-            "financial_status_posted_only_rows": posted,
-            "proof_committed_fingerprint": proof.get(
-                "reservation_stay_status_sha256", "not_found"
-            ),
-        })
-
-except Exception:
-    pass
+        print("HEALTH ROUTE HIT")
+        return {"test": "route works"}
+except Exception as e:
+    print("HEALTH REGISTRATION FAILED:", e)
