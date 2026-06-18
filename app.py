@@ -1,4 +1,3 @@
-
 import asyncio
 import json
 import os
@@ -16,9 +15,9 @@ executor = ThreadPoolExecutor(max_workers=2)
 BASIC_AUTH_USER = os.environ.get("BASIC_AUTH_USER")
 BASIC_AUTH_PASS = os.environ.get("BASIC_AUTH_PASS")
 
-# Store pending HITL state outside Chainlit context
-_pending_questions: dict = {}   # session_id -> original question
-_pending_tool_args: dict = {}   # session_id -> {stay_month, as_of_utc}
+
+_pending_questions: dict = {}
+_pending_tool_args: dict = {}
 
 
 @cl.password_auth_callback
@@ -54,18 +53,13 @@ def _run_agent(messages, config):
 
 
 def _resume_agent(original_question, tool_args, config):
-    """Resume after HITL approval.
-    Calls get_as_of_otb directly (bypasses interrupt gate),
-    then asks a fresh agent instance to synthesize the result.
-    Runs entirely in a thread — no Chainlit context needed.
-    """
+
     stay_month = tool_args.get("stay_month", "2026-07")
     as_of_utc = tool_args.get("as_of_utc") or (
         (datetime.now(timezone.utc) - timedelta(days=30))
         .strftime("%Y-%m-%dT%H:%M:%SZ")
     )
 
-    # Step 1: Call tool directly — no agent, no interrupt gate
     try:
         tool_result = get_as_of_otb.invoke({
             "stay_month": stay_month,
@@ -81,7 +75,7 @@ def _resume_agent(original_question, tool_args, config):
             ]
         }, False, {}
 
-    # Step 2: Fresh thread_id for synthesis — avoids re-triggering interrupt
+
     session_id = config["configurable"]["thread_id"]
     fresh_config = make_config(f"{session_id}_resume_{int(time.time())}")
 
@@ -94,7 +88,7 @@ def _resume_agent(original_question, tool_args, config):
     )
     result = agent.invoke({"messages": synthesis_prompt}, config=fresh_config)
 
-    # Fallback if fresh agent also triggers interrupt
+
     if isinstance(result, dict) and result.get("__interrupt__"):
         data = json.loads(tool_result)
         summary = (
@@ -119,11 +113,9 @@ def _resume_agent(original_question, tool_args, config):
 @cl.on_message
 async def main(message: cl.Message):
     session_id = cl.user_session.get("id", "default")
-    # Each Chainlit session has its own thread_id — follow-up questions
-    # within the same session retain context. New login = new session = fresh context.
     config = make_config(session_id)
 
-    # One request at a time per session
+
     if cl.user_session.get("processing", False):
         await cl.Message(
             content="⏳ Still processing previous request, please wait..."
@@ -135,7 +127,7 @@ async def main(message: cl.Message):
     try:
         pending_hitl = cl.user_session.get("pending_hitl", False)
 
-        # ── HITL resume path ──────────────────────────────────────────────
+
         if pending_hitl:
             user_response = message.content.strip().lower()
             cl.user_session.set("pending_hitl", False)
@@ -259,49 +251,91 @@ async def _send_result(result):
         await cl.Message(content="Could not generate a response.").send()
 
 
-# Mount /health on Chainlit's FastAPI app
+
 try:
+    import hashlib
     from chainlit.server import app as chainlit_app
     from fastapi.responses import JSONResponse
     import psycopg2
     from pathlib import Path
 
-    @chainlit_app.get("/health")
-    def health():
+    def _get_health_conn():
         db_url = (
             os.environ.get("HOTEL_DATABASE_URL")
             or os.environ.get("DATABASE_URL")
         )
+        return psycopg2.connect(db_url)
+
+    def _load_proof_data():
+        proof_path = Path("etl/LOAD_PROOF.json")
+        if proof_path.exists():
+            with open(proof_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        return {}
+
+    def _compute_live_fingerprint(conn):
+
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT reservation_id,
+                   stay_date::text,
+                   financial_status
+            FROM reservations_hackathon
+            ORDER BY reservation_id,
+                     stay_date,
+                     financial_status
+            """
+        )
+        rows = cur.fetchall()
+        lines = [
+            f"{reservation_id}|{stay_date}|{financial_status}"
+            for reservation_id, stay_date, financial_status in rows
+        ]
+        payload = "\n".join(lines).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    @chainlit_app.get("/health")
+    def health():
         try:
-            conn = psycopg2.connect(db_url)
-            cur = conn.cursor()
-            cur.execute("""
-                SELECT dataset_revision, row_hash
-                FROM load_manifest
-                ORDER BY scraped_at DESC NULLS LAST
-                LIMIT 1
-            """)
-            row = cur.fetchone()
-            cur.execute("""
-                SELECT COUNT(*) FROM reservations_hackathon
-                WHERE financial_status = 'Posted'
-                  AND reservation_status != 'Cancelled'
-            """)
-            posted = cur.fetchone()[0]
-            conn.close()
+            conn = _get_health_conn()
+            try:
+                live_fingerprint = _compute_live_fingerprint(conn)
+
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT dataset_revision, row_hash
+                    FROM load_manifest
+                    ORDER BY load_id DESC
+                    LIMIT 1
+                    """
+                )
+                row = cur.fetchone()
+
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM reservations_hackathon
+                    WHERE financial_status = 'Posted'
+                      AND reservation_status != 'Cancelled'
+                    """
+                )
+                posted = cur.fetchone()[0]
+            finally:
+                conn.close()
         except Exception as e:
             return JSONResponse(
                 {"status": "db_error", "error": str(e)}, status_code=500
             )
 
-        proof = {}
-        p = Path("etl/LOAD_PROOF.json")
-        if p.exists():
-            import json as _json
-            proof = _json.loads(p.read_text())
+        proof = _load_proof_data()
 
         return JSONResponse({
             "status": "ok",
+            "db_fingerprint": live_fingerprint,
+            "db_fingerprint_matches_proof": (
+                live_fingerprint == proof.get("reservation_stay_status_sha256")
+            ),
             "dataset_revision": row[0] if row else None,
             "row_hash": row[1] if row else None,
             "financial_status_posted_only_rows": posted,
