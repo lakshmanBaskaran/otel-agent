@@ -28,9 +28,6 @@ def auth_callback(username: str, password: str):
 
 
 def _run_agent(messages, config):
-    """Run agent synchronously in thread.
-    Returns (result, interrupted, tool_args).
-    """
     result = agent.invoke({"messages": messages}, config=config)
 
     if isinstance(result, dict):
@@ -53,7 +50,6 @@ def _run_agent(messages, config):
 
 
 def _resume_agent(original_question, tool_args, config):
-
     stay_month = tool_args.get("stay_month", "2026-07")
     as_of_utc = tool_args.get("as_of_utc") or (
         (datetime.now(timezone.utc) - timedelta(days=30))
@@ -75,7 +71,6 @@ def _resume_agent(original_question, tool_args, config):
             ]
         }, False, {}
 
-
     session_id = config["configurable"]["thread_id"]
     fresh_config = make_config(f"{session_id}_resume_{int(time.time())}")
 
@@ -87,7 +82,6 @@ def _resume_agent(original_question, tool_args, config):
         f"Compare to the current OTB if relevant, and give a sharp RM analysis."
     )
     result = agent.invoke({"messages": synthesis_prompt}, config=fresh_config)
-
 
     if isinstance(result, dict) and result.get("__interrupt__"):
         data = json.loads(tool_result)
@@ -115,7 +109,6 @@ async def main(message: cl.Message):
     session_id = cl.user_session.get("id", "default")
     config = make_config(session_id)
 
-
     if cl.user_session.get("processing", False):
         await cl.Message(
             content="⏳ Still processing previous request, please wait..."
@@ -126,7 +119,6 @@ async def main(message: cl.Message):
 
     try:
         pending_hitl = cl.user_session.get("pending_hitl", False)
-
 
         if pending_hitl:
             user_response = message.content.strip().lower()
@@ -201,7 +193,6 @@ async def main(message: cl.Message):
 
 
 async def _send_result(result):
-
     if not isinstance(result, dict) or "messages" not in result:
         await cl.Message(content=str(result)).send()
         return
@@ -250,7 +241,6 @@ async def _send_result(result):
         await cl.Message(content="Could not generate a response.").send()
 
 
-
 try:
     import hashlib
     from chainlit.server import app as chainlit_app
@@ -273,7 +263,6 @@ try:
         return {}
 
     def _compute_live_fingerprint(conn):
-
         cur = conn.cursor()
         cur.execute(
             """
@@ -294,10 +283,57 @@ try:
         payload = "\n".join(lines).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
-
-    @chainlit_app.get("/healthotel")
+    @chainlit_app.get("/health")
     def health():
-        print("HEALTH ROUTE HIT")
-        return {"test": "route works"}
+        try:
+            conn = _get_health_conn()
+            try:
+                live_fingerprint = _compute_live_fingerprint(conn)
+
+                cur = conn.cursor()
+                cur.execute(
+                    """
+                    SELECT dataset_revision, row_hash
+                    FROM load_manifest
+                    ORDER BY load_id DESC
+                    LIMIT 1
+                    """
+                )
+                row = cur.fetchone()
+
+                cur.execute(
+                    """
+                    SELECT COUNT(*) FROM reservations_hackathon
+                    WHERE financial_status = 'Posted'
+                      AND reservation_status != 'Cancelled'
+                    """
+                )
+                posted = cur.fetchone()[0]
+            finally:
+                conn.close()
+        except Exception as e:
+            return JSONResponse(
+                {"status": "db_error", "error": str(e)}, status_code=500
+            )
+
+        proof = _load_proof_data()
+
+        return JSONResponse({
+            "status": "ok",
+            "db_fingerprint": live_fingerprint,
+            "db_fingerprint_matches_proof": (
+                live_fingerprint == proof.get("reservation_stay_status_sha256")
+            ),
+            "dataset_revision": row[0] if row else None,
+            "row_hash": row[1] if row else None,
+            "financial_status_posted_only_rows": posted,
+            "proof_committed_fingerprint": proof.get(
+                "reservation_stay_status_sha256", "not_found"
+            ),
+        })
+
+    route = chainlit_app.router.routes.pop()
+    chainlit_app.router.routes.insert(0, route)
+
 except Exception as e:
     print("HEALTH REGISTRATION FAILED:", e)
