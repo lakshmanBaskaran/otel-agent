@@ -1,11 +1,4 @@
-"""
-app.py - Chainlit UI for the Revenue Manager Agent.
-Handles HITL interrupts for get_as_of_otb.
-On approval: calls the tool directly (bypassing interrupt gate),
-then asks the agent to synthesize the result.
-Context accumulation fix: each Chainlit session uses its own thread_id.
-Follow-up questions within a session retain context.
-"""
+
 import asyncio
 import json
 import os
@@ -20,8 +13,8 @@ from tools import get_as_of_otb
 agent = build_agent()
 executor = ThreadPoolExecutor(max_workers=2)
 
-BASIC_AUTH_USER = os.environ.get("BASIC_AUTH_USER", "otel")
-BASIC_AUTH_PASS = os.environ.get("BASIC_AUTH_PASS", "revenue2026")
+BASIC_AUTH_USER = os.environ.get("BASIC_AUTH_USER")
+BASIC_AUTH_PASS = os.environ.get("BASIC_AUTH_PASS")
 
 # Store pending HITL state outside Chainlit context
 _pending_questions: dict = {}   # session_id -> original question
