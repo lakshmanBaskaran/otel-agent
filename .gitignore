@@ -26,6 +26,9 @@ evaluate.py
 evaluate_hard.py
 eval_results.json
 eval_hard_results.json
+evaluation_results.csv
+evaluation_summary.json
+get-pip.py
 
 # Logs
 *.log
