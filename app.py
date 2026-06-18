@@ -163,7 +163,6 @@ async def main(message: cl.Message):
                 ).send()
             return
 
-        # ── Normal message path ───────────────────────────────────────────
         thinking = cl.Message(content="⏳ Analysing...")
         await thinking.send()
 
@@ -202,7 +201,7 @@ async def main(message: cl.Message):
 
 
 async def _send_result(result):
-    """Extract tool calls and final response from agent result."""
+
     if not isinstance(result, dict) or "messages" not in result:
         await cl.Message(content=str(result)).send()
         return
@@ -295,7 +294,7 @@ try:
         payload = "\n".join(lines).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
-    @chainlit_app.get("/health")
+    @chainlit_app.get("/healthotel")
     def health():
         try:
             conn = _get_health_conn()

@@ -15,7 +15,7 @@ URL and credentials are provided privately via the submission intake.
 The deployed UI shows tool calls and skill loads inline so the reviewer can
 verify routing and progressive disclosure live.
 
-`GET /health` (separate port) returns the DB fingerprint, dataset revision,
+`GET /healthotel` returns the DB fingerprint, dataset revision,
 row hash, and posted-row count for cross-checking against `etl/LOAD_PROOF.json`.
 
 ---
