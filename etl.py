@@ -251,20 +251,7 @@ def load_lookups(conn, room_types, market_codes, channel_codes, rate_plans, macr
           f"{len(macro_history)} macro history")
 
 
-def backfill_missing_rate_plans(conn, rows):
-    cur = conn.cursor()
-    all_codes = set(r["rate_plan_code"] for r in rows if r["rate_plan_code"])
-    cur.execute("SELECT rate_plan_code FROM rate_plan_lookup")
-    existing = set(row[0] for row in cur.fetchall())
-    missing = all_codes - existing
-    if missing:
-        print(f"  Backfilling {len(missing)} missing rate plans: {missing}")
-        for code in missing:
-            cur.execute("""
-                INSERT INTO rate_plan_lookup (rate_plan_code, plan_family, is_commissionable)
-                VALUES (%s, 'Unknown', false) ON CONFLICT DO NOTHING
-            """, (code,))
-        conn.commit()
+
 
 
 def load_reservations(conn, rows):
@@ -274,8 +261,7 @@ def load_reservations(conn, rows):
     if skipped:
         print(f"  Skipped {skipped} rows with missing fields")
 
-    backfill_missing_rate_plans(conn, valid)
-
+#   backfill_missing_rate_plans(conn, valid)
     execute_values(cur, """
         INSERT INTO reservations_hackathon (
             reservation_id, arrival_date, departure_date, stay_date, property_date,

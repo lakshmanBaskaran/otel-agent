@@ -4,7 +4,7 @@
 
 ### Why Playwright
 
-The brief mentioned Playwright from the start, but the first attempt used BeautifulSoup with `requests` — the thinking was that static HTML parsing would be faster and simpler. It wasn't. The data site is client-rendered JavaScript: a plain HTTP request returns an empty shell with no reservation data in it. BeautifulSoup had nothing to parse.
+The brief mentioned Playwright from the start, but the first attempt used BeautifulSoup with `requests`  the idea was that static HTML parsing would be faster and simpler. It wasn't. The data site is client-rendered JavaScript: a plain HTTP request returns an empty shell with no reservation data in it. BeautifulSoup had nothing to parse.
 
 Switched to Playwright, which drives a real Chromium browser and waits for JavaScript to finish rendering before extracting content. Two `wait_for_load_state("networkidle")` calls — one after page navigation and one after detail page load — ensure the DOM is fully populated before extraction runs.
 
@@ -12,19 +12,16 @@ Switched to Playwright, which drives a real Chromium browser and waits for JavaS
 
 The first Playwright implementation still used BeautifulSoup to parse the rendered HTML. The detail page is a key-value grid (not a table), and BeautifulSoup's `find_next_sibling()` approach was unreliable — it picked up wrong sibling elements, producing revenue figures 2× the correct value and cancelled counts 3× off.
 
-Rewrote `scrape_reservation_detail` to use `page.evaluate()` — JavaScript running directly inside the live browser DOM. This is more reliable because it queries the exact rendered element tree rather than a serialised HTML string. BeautifulSoup is still used for the reference and list pages, which are simpler table structures.
+Rewrote `scrape_reservation_detail` to use `page.evaluate()` JavaScript running directly inside the live browser DOM. This is more reliable because it queries the exact rendered element tree rather than a serialised HTML string. BeautifulSoup is still used for the reference and list pages, which are simpler table structures.
 
-### Why page.evaluate() for pagination
-
-The "Next →" button contains a Unicode arrow character. BeautifulSoup couldn't find it in the rendered HTML. Attempts to navigate via `?page=2` URL parameter also failed — the site manages pagination through client-side state and ignores URL params. The fix was `page.evaluate()` to find and click the Next button via JavaScript in the live DOM.
 
 ### Docker → Neon
 
-Started with a local Docker Postgres. Hit `scram-sha-256` authentication failures that persisted through multiple pg_hba.conf edits. Switched to Neon (eu-west-2) — faster to set up, no auth configuration needed, and the deployment needs a hosted DB anyway. Not a planned architectural choice; a forced one that turned out to be the right one.
+Started with a local Docker Postgres. Hit `scram-sha-256` authentication failures that persisted through multiple pg_hba.conf edits. Switched to Neon (eu-west-2)  faster to set up, no auth configuration needed, and the deployment needs a hosted DB anyway. Not a planned architectural choice; a forced one that turned out to be the right one.
 
 ### Truncate-and-reload
 
-Initial load strategy was upsert with `ON CONFLICT DO UPDATE`. This ran into two problems: `reservation_stay_id` is `GENERATED ALWAYS` in the schema, so inserting scraped IDs required `OVERRIDING SYSTEM VALUE`; and the same composite key (`reservation_id × stay_date`) could appear twice in the same batch before the upsert could resolve it, causing `CardinalityViolation`. Switched to truncate-and-reload: drop all rows, assign fresh sequential IDs, insert clean. The dataset is small enough (~531 rows) that a full reload takes under 5 seconds and removes all conflict resolution complexity.
+Initial load strategy was upsert with `ON CONFLICT DO UPDATE`. This ran into two problems: `reservation_stay_id` is `GENERATED ALWAYS` in the schema, so inserting scraped IDs required `OVERRIDING SYSTEM VALUE`; and the same composite key (`reservation_id × stay_date`) could appear twice in the same batch before the upsert could resolve it, causing `CardinalityViolation`. Switched to truncate-and-reload: drop all rows, assign fresh sequential IDs, insert clean. The dataset is small enough that a full reload takes under 5 seconds and removes all conflict resolution complexity.
 
 ### Anchor date
 
@@ -32,7 +29,7 @@ The data site regenerates its dataset daily from today's date. What counts as a 
 
 ### property_date vs stay_date
 
-During verification, found exactly 3 rows where `property_date != stay_date`. These are night-boundary or audit attribution rows where the hotel's accounting system assigns the revenue to a different business date than the physical stay night. All monthly OTB aggregations use `stay_date` — the consistent business grain — not `property_date`. The 3 mismatches are documented and tested in `test_property_date_mismatch_count`.
+During verification, found exactly 3 rows where `property_date != stay_date`. These are night-boundary or audit attribution rows where the hotel's accounting system assigns the revenue to a different business date than the physical stay night. All monthly OTB aggregations use `stay_date` the consistent business grain not `property_date`. The 3 mismatches are documented and tested in `test_property_date_mismatch_count`.
 
 ---
 
@@ -40,41 +37,41 @@ During verification, found exactly 3 rows where `property_date != stay_date`. Th
 
 ### Neon Postgres
 
-The brief specifies a hosted Postgres for deployment. Started with the Docker instance from the brief's `docker-compose.yml` but hit persistent authentication failures (`scram-sha-256` auth refusing connections despite correct credentials and pg_hba.conf edits). Switched to Neon (eu-west-2) — took two minutes to set up and eliminated the auth complexity. The DB stays on Neon for deployment; there was no reason to maintain two separate databases.
+The brief specifies a hosted Postgres for deployment. Started with the Docker instance from the brief's `docker-compose.yml` but hit persistent authentication failures (`scram-sha-256` auth refusing connections despite correct credentials and pg_hba.conf edits). Switched to Neon (eu-west-2)  took two minutes to set up and eliminated the auth complexity. The DB stays on Neon for deployment; there was no reason to maintain two separate databases.
 
 Connection via `HOTEL_DATABASE_URL` environment variable. The name is deliberate — using `DATABASE_URL` activates Chainlit's built-in data layer (session persistence, user history), which we don't want. Renaming to `HOTEL_DATABASE_URL` keeps Chainlit stateless and avoids the `asyncpg` dependency that caused deployment errors.
 
 ### Why views (brief requirement)
 
-The brief requires `vw_stay_night_base` and `vw_segment_stay_night` from `sql/VIEWS.example.sql`. The views create a semantic layer between tools and raw tables — instead of each tool re-implementing the same cancellation and provisional filters, the view enforces them once and all tools query the view. A tool querying raw `reservations_hackathon` would need to remember to exclude `reservation_status = 'Cancelled'` and `financial_status = 'Provisional'` on every call. The view makes correct behaviour the default.
+The brief requires `vw_stay_night_base` and `vw_segment_stay_night` from `sql/VIEWS.example.sql`. The views create a semantic layer between tools and raw tables  instead of each tool re-implementing the same cancellation and provisional filters, the view enforces them once and all tools query the view. A tool querying raw `reservations_hackathon` would need to remember to exclude `reservation_status = 'Cancelled'` and `financial_status = 'Provisional'` on every call. The view makes correct behaviour the default.
 
 ### vw_stay_night_base
 
-Default OTB universe: `reservation_status != 'Cancelled'` AND `financial_status = 'Posted'`. This is the brief's Appendix A definition of the GM briefing universe. Five of the seven tools query this view. The exception is `get_as_of_otb`, which queries raw `reservations_hackathon` directly — point-in-time logic requires comparing `cancellation_datetime` against an arbitrary timestamp, which the view's static filter can't express.
+Default OTB universe: `reservation_status != 'Cancelled'` AND `financial_status = 'Posted'`. This is the brief's Appendix A definition of the GM briefing universe. Five of the seven tools query this view. The exception is `get_as_of_otb`, which queries raw `reservations_hackathon` directly  point-in-time logic requires comparing `cancellation_datetime` against an arbitrary timestamp, which the view's static filter can't express.
 
 ### vw_segment_stay_night
 
-Extends `vw_stay_night_base` with effective macro group via a LATERAL join on `market_macro_group_history`. The brief notes that PROM (Promotional Retail) gets reclassified mid-year in the history table. A static join on `market_code_lookup.macro_group` would assign PROM the wrong macro group for stays after the reclassification date. The LATERAL join on `stay_date BETWEEN valid_from AND valid_to` handles this correctly — segment mix analysis always uses the macro group that was valid on the actual stay date. `COALESCE(h.macro_group, m.macro_group)` falls back to the lookup table's static group if no history row matches.
+Extends `vw_stay_night_base` with effective macro group via a LATERAL join on `market_macro_group_history`. The brief notes that PROM (Promotional Retail) gets reclassified mid-year in the history table. A static join on `market_code_lookup.macro_group` would assign PROM the wrong macro group for stays after the reclassification date. The LATERAL join on `stay_date BETWEEN valid_from AND valid_to` handles this correctly  segment mix analysis always uses the macro group that was valid on the actual stay date. `COALESCE(h.macro_group, m.macro_group)` falls back to the lookup table's static group if no history row matches.
 
 ---
 
 ## 3. Tool layer
 
-I initially built 9 tools against a shared `metrics.py` module, but when the brief updated mid-challenge with a stricter spec I had to drop everything and rewrite from scratch. The new spec required exactly five tools with exact names, exact signatures, and exact view dependencies. I kept two bonus tools on top — `get_room_type_performance` and `get_top_companies` — since the brief's example questions implied them.
+I initially built 9 tools against a shared `metrics.py` module, but when the brief updated mid-challenge with a stricter spec I had to drop everything and rewrite from scratch. The new spec required exactly five tools with exact names, exact signatures, and exact view dependencies. I kept two bonus tools on top  `get_room_type_performance` and `get_top_companies`  since the brief's example questions implied them.
 
 ### What each tool does
 
 **`get_otb_summary(stay_month, exclude_cancelled=True)`**
-The main OTB snapshot for a calendar month. Takes a month in `YYYY-MM` format. By default queries `vw_stay_night_base` which pre-filters to Posted non-cancelled rows — that's the standard GM briefing universe. If `exclude_cancelled=False` is passed, it queries `reservations_hackathon` directly with only the provisional filter removed, so cancelled rows come through. Returns `row_count` (stay-date rows), `reservation_count` (distinct reservation IDs), `room_nights` (sum of `number_of_spaces`), `room_revenue`, and `total_revenue`. The grain distinction matters — a 3-night booking creates 3 rows but 1 reservation and 3 room nights.
+The main OTB snapshot for a calendar month. Takes a month in `YYYY-MM` format. By default queries `vw_stay_night_base` which pre-filters to Posted non-cancelled rows  that's the standard GM briefing universe. If `exclude_cancelled=False` is passed, it queries `reservations_hackathon` directly with only the provisional filter removed, so cancelled rows come through. Returns `row_count` (stay-date rows), `reservation_count` (distinct reservation IDs), `room_nights` (sum of `number_of_spaces`), `room_revenue`, and `total_revenue`. The grain distinction matters a 3-night booking creates 3 rows but 1 reservation and 3 room nights.
 
 **`get_segment_mix(stay_month, macro_group="")`**
-Breaks down the month by market segment using `vw_segment_stay_night`. This view does the effective macro group join via LATERAL — it picks the correct macro group from `market_macro_group_history` based on `stay_date`, not the static value in `market_code_lookup`. This matters because PROM gets reclassified mid-year. The `macro_group` parameter lets you filter to a single macro group (e.g. "Retail" or "MICE") and the shares recalculate within that filtered population. Returns each segment's `market_code`, `market_name`, `macro_group`, `room_nights`, `total_revenue`, `share_of_room_nights`, and `share_of_revenue`. Shares always sum to 1.0 within the scope.
+Breaks down the month by market segment using `vw_segment_stay_night`. This view does the effective macro group join via LATERAL it picks the correct macro group from `market_macro_group_history` based on `stay_date`, not the static value in `market_code_lookup`. This matters because PROM gets reclassified mid-year. The `macro_group` parameter lets you filter to a single macro group (e.g. "Retail" or "MICE") and the shares recalculate within that filtered population. Returns each segment's `market_code`, `market_name`, `macro_group`, `room_nights`, `total_revenue`, `share_of_room_nights`, and `share_of_revenue`. Shares always sum to 1.0 within the scope.
 
 **`get_pickup_delta(booking_window_days, future_stay_from)`**
-Booking pace — how much new business was created in the last N days for stays from a given date forward. Uses `create_datetime` for the booking window, not `stay_date`. The window start is calculated as midnight Europe/London time N days ago, then converted to UTC before querying — per the brief's Appendix B. Returns `new_reservations`, `new_room_nights`, `new_total_revenue`, and a `by_segment` breakdown of the top 5 market codes by revenue within the window. Also echoes back `window_start_utc` so the GM can see the exact boundary used.
+Booking pace — how much new business was created in the last N days for stays from a given date forward. Uses `create_datetime` for the booking window, not `stay_date`. The window start is calculated as midnight Europe/London time N days ago, then converted to UTC before querying  per the brief's Appendix B. Returns `new_reservations`, `new_room_nights`, `new_total_revenue`, and a `by_segment` breakdown of the top 5 market codes by revenue within the window. Also echoes back `window_start_utc` so the GM can see the exact boundary used.
 
 **`get_as_of_otb(stay_month, as_of_utc)`**
-Point-in-time OTB — what did the book look like at a past timestamp. Queries `reservations_hackathon` directly, not the view, because the view's static `reservation_status != 'Cancelled'` filter would exclude too much. The logic is: include a row if `create_datetime <= as_of_utc` AND either the reservation was never cancelled OR `cancellation_datetime > as_of_utc`. This means a reservation that was cancelled after the snapshot date still counts — it was on the books at that point. Returns the same shape as `get_otb_summary` plus the `as_of_utc` echoed back. HITL-gated via `interrupt_on={"get_as_of_otb": True}` — the GM must approve before it runs.
+Point-in-time OTB — what did the book look like at a past timestamp. Queries `reservations_hackathon` directly, not the view, because the view's static `reservation_status != 'Cancelled'` filter would exclude too much. The logic is: include a row if `create_datetime <= as_of_utc` AND either the reservation was never cancelled OR `cancellation_datetime > as_of_utc`. This means a reservation that was cancelled after the snapshot date still counts  it was on the books at that point. Returns the same shape as `get_otb_summary` plus the `as_of_utc` echoed back. HITL-gated via `interrupt_on={"get_as_of_otb": True}` the GM must approve before it runs.
 
 **`get_block_vs_transient_mix(stay_month)`**
 Splits the month into group (`is_block=true`) and transient (`is_block=false`) using `vw_stay_night_base`. Returns `block_room_nights`, `transient_room_nights`, `block_total_revenue`, `transient_total_revenue`, `block_share_of_room_nights`, `block_share_of_revenue`, and the top 3 companies by revenue with their combined share. The `is_block` flag is the correct grain-level group identifier — not market code, not macro group.
@@ -101,31 +98,31 @@ See `tools/METRIC_DEFINITIONS.md` for formal grain definitions.
 
 ### Model and system prompt
 
-The agent runs on `claude-sonnet-4-6`. The system prompt sets a revenue manager persona — it tells the agent to lead with the headline, show the key numbers, explain what's driving them, flag risks, and end with a specific recommendation. It also injects today's date so the agent never defaults to a past year when the GM mentions a month without a year. The data rules are in the prompt too — room nights are always `SUM(number_of_spaces)`, reservation count is always `COUNT(DISTINCT reservation_id)`, never `COUNT(*)`.
+The agent runs on `claude-sonnet-4-6`. The system prompt sets a revenue manager persona  it tells the agent to lead with the headline, show the key numbers, explain what's driving them, flag risks, and end with a specific recommendation. It also injects today's date so the agent never defaults to a past year when the GM mentions a month without a year. The data rules are in the prompt too — room nights are always `SUM(number_of_spaces)`, reservation count is always `COUNT(DISTINCT reservation_id)`, never `COUNT(*)`.
 
 ### Subagents
 
 The brief required a subagent for segment mix or block mix work. I built two.
 
-The **segment-analyst** handles everything about what's driving the business — which segments are contributing, how the OTA split looks, group vs transient, company concentration. It has `get_segment_mix`, `get_block_vs_transient_mix`, `get_top_companies`, and `get_otb_summary` as context. When the GM asks "what's driving July?" or "are we too dependent on OTA?", the main agent delegates to segment-analyst.
+The **segment-analyst** handles everything about what's driving the business  which segments are contributing, how the OTA split looks, group vs transient, company concentration. It has `get_segment_mix`, `get_block_vs_transient_mix`, `get_top_companies`, and `get_otb_summary` as context. When the GM asks "what's driving July?" or "are we too dependent on OTA?", the main agent delegates to segment-analyst.
 
-The **demand-analyst** handles booking momentum — what changed recently, how fast we're picking up, which months have weak pace. It has `get_pickup_delta` and `get_otb_summary` for context. When the GM asks "what changed in the last 7 days?" or "how is August pacing?", it goes to demand-analyst.
+The **demand-analyst** handles booking momentum  what changed recently, how fast we're picking up, which months have weak pace. It has `get_pickup_delta` and `get_otb_summary` for context. When the GM asks "what changed in the last 7 days?" or "how is August pacing?", it goes to demand-analyst.
 
-I originally had a Risk Analyst subagent instead of a Segment Analyst — the idea was that risk questions like cancellations and concentration risk would go to a defensive-thinking subagent. But the brief update was explicit: segment mix or block mix must route through a subagent. So I rebuilt around that. The risk analysis now lives in the skills rather than a dedicated subagent.
+I originally had a Risk Analyst subagent instead of a Segment Analyst  the idea was that risk questions like cancellations and concentration risk would go to a defensive-thinking subagent. But the brief update was explicit: segment mix or block mix must route through a subagent. So I rebuilt around that. The risk analysis now lives in the skills rather than a dedicated subagent.
 
 ### Skills
 
-10 skill files in `skills/`. Each is a `SKILL.md` with YAML frontmatter. Deep Agents loads them on demand via progressive disclosure — the agent reads the skill when the question type matches the description, not upfront on every message. The skills encode judgment: thresholds, what those thresholds mean for this hotel, what to recommend. The tools return numbers. The skills teach the agent how to interpret them. (Details in Section 5.)
+10 skill files in `skills/`. Each is a `SKILL.md` with YAML frontmatter. Deep Agents loads them on demand via progressive disclosure  the agent reads the skill when the question type matches the description, not upfront on every message. The skills encode judgment: thresholds, what those thresholds mean for this hotel, what to recommend. The tools return numbers. The skills teach the agent how to interpret them. (Details in Section 5.)
 
 ### Memory
 
-`MemorySaver` checkpointer added to `create_deep_agent`. This was necessary for the HITL flow — without a checkpointer, `Command(resume=...)` has nothing to resume into and throws an error. It also keeps multi-turn conversation state so the GM can ask "what about August?" as a follow-up without restating context. `memory/AGENTS.md` holds hotel-level context that persists across turns — room types, currency, GM preferences.
+`MemorySaver` checkpointer added to `create_deep_agent`. This was necessary for the HITL flow — without a checkpointer, `Command(resume=...)` has nothing to resume into and throws an error. It also keeps multi-turn conversation state so the GM can ask "what about August?" as a follow-up without restating context. `memory/AGENTS.md` holds hotel-level context that persists across turns room types, currency, GM preferences.
 
 ### Human-in-the-loop
 
-`get_as_of_otb` is gated via `interrupt_on={"get_as_of_otb": True}`. It's the only tool that does a full raw table scan without the view's pre-filtering — it's the most compute-heavy query in the system. More importantly, a point-in-time snapshot looks identical to current OTB in the chat if the GM doesn't notice the `as_of_utc` timestamp. The gate forces the agent to tell the GM exactly what it's about to run and get explicit approval before it runs.
+`get_as_of_otb` is gated via `interrupt_on={"get_as_of_otb": True}`. It's the only tool that does a full raw table scan without the view's pre-filtering it's the most compute-heavy query in the system. More importantly, a point-in-time snapshot looks identical to current OTB in the chat if the GM doesn't notice the `as_of_utc` timestamp. The gate forces the agent to tell the GM exactly what it's about to run and get explicit approval before it runs.
 
-The Chainlit implementation of HITL went through several iterations. The first attempt used `Command(resume=...)` from LangGraph to resume the interrupted graph — this worked for the interrupt gate but Deep Agents treated the resume command as a new incoming message, which cancelled the in-flight tool call and caused the tool to run twice with no final synthesis. The final solution bypasses the resume entirely: on approval, the tool is called directly from Python, the raw result is passed to a fresh agent instance with a new thread ID for synthesis. This avoids the interrupt gate on the synthesis call entirely.
+The Chainlit implementation of HITL went through several iterations. The first attempt used `Command(resume=...)` from LangGraph to resume the interrupted graph this worked for the interrupt gate but Deep Agents treated the resume command as a new incoming message, which cancelled the in-flight tool call and caused the tool to run twice with no final synthesis. The final solution bypasses the resume entirely: on approval, the tool is called directly from Python, the raw result is passed to a fresh agent instance with a new thread ID for synthesis. This avoids the interrupt gate on the synthesis call entirely.
 
 A session lock (`processing` flag in `cl.user_session`) prevents race conditions — Render's free tier is slow enough that a user could send a second message before the first response completes, which would cancel the first tool call mid-execution.
 
@@ -137,18 +134,18 @@ Built into Deep Agents by default. The agent decomposes multi-part questions int
 
 ## 5. Skill → tool routing matrix and threshold calibration
 
-| Skill | Primary tool(s) | Judgment |
-|---|---|---|
-| `otb_position` | `get_otb_summary` | ✅ Relative thresholds, 5 ADR scenarios |
-| `pickup_and_pace` | `get_pickup_delta` + `get_otb_summary` | ✅ Pickup ADR vs OTB ADR signal, 5 volume scenarios |
-| `segment_concentration` | `get_segment_mix` + `get_block_vs_transient_mix` | ✅ 6-layer answer pattern, 35% concentration flag |
-| `channel_dependency` | `get_segment_mix` | ✅ OTA thresholds 15/25/40%, rate parity divergence |
-| `concentration_risk` | `get_block_vs_transient_mix` | ✅ Top-3 share 30/50/70%, account vs block risk |
-| `cancellation_patterns` | `get_otb_summary` + `get_pickup_delta` | ✅ Cancellation rate 8/15/25%, NET position principle |
-| `group_block_management` | `get_block_vs_transient_mix` | ✅ Block share 30/50/70%, displacement reasoning |
-| `rate_integrity` | `get_otb_summary` + `get_pickup_delta` | ✅ Hold vs flex decision framework |
-| `point_in_time` | `get_as_of_otb` | ✅ HITL rationale, 4 use cases, trap warnings |
-| `CHALLENGE_SKILL` | All tools | Version pin: `otel-rm-v2` |
+| Skill | Primary tool(s) | Judgment                                           |
+|---|---|----------------------------------------------------|
+| `otb_position` | `get_otb_summary` | Relative thresholds, 5 ADR scenarios               |
+| `pickup_and_pace` | `get_pickup_delta` + `get_otb_summary` | Pickup ADR vs OTB ADR signal, 5 volume scenarios   |
+| `segment_concentration` | `get_segment_mix` + `get_block_vs_transient_mix` | 6-layer answer pattern, 35% concentration flag     |
+| `channel_dependency` | `get_segment_mix` | OTA thresholds 15/25/40%, rate parity divergence   |
+| `concentration_risk` | `get_block_vs_transient_mix` | Top-3 share 30/50/70%, account vs block risk       |
+| `cancellation_patterns` | `get_otb_summary` + `get_pickup_delta` | Cancellation rate 8/15/25%, NET position principle |
+| `group_block_management` | `get_block_vs_transient_mix` | Block share 30/50/70%, displacement reasoning      |
+| `rate_integrity` | `get_otb_summary` + `get_pickup_delta` | Hold vs flex decision framework                    |
+| `point_in_time` | `get_as_of_otb` | HITL rationale, 4 use cases, trap warnings         |
+| `CHALLENGE_SKILL` | All tools | Version pin: `otel-rm-v2`                          |
 
 ### The biggest challenge — relative vs absolute thresholds
 
@@ -176,14 +173,14 @@ For each skill the calibration went like this:
 
 ### Scalability thinking
 
-We thought a lot about what happens if Grand Harbour grows — more rooms, more months of history, different mix profile. The skills are designed to stay valid as the hotel scales because:
+We thought a lot about what happens if Grand Harbour grows more rooms, more months of history, different mix profile. The skills are designed to stay valid as the hotel scales because:
 
 1. Most thresholds are percentages not absolute counts, so they scale with hotel size automatically
 2. Where absolute numbers are used (like ADR bands), they're framed as "for a mid-market European city hotel" so the GM knows they need recalibrating for a different property
-3. The relative threshold approach (cross-month average as baseline) means the skill learns from the hotel's own patterns over time — a summer-heavy hotel will automatically have different monthly baselines than an even-distribution hotel
+3. The relative threshold approach (cross-month average as baseline) means the skill learns from the hotel's own patterns over time a summer-heavy hotel will automatically have different monthly baselines than an even-distribution hotel
 4. The skills explicitly tell the agent to state the absolute number alongside every percentage so the GM can sanity check the math
 
-The one thing that doesnt scale well is the 6-layer answer pattern in `segment_concentration` — it was calibrated for a hotel with a limited market code set. A 500-room conference hotel with 25 market codes would need a different breakdown structure. We flagged this in the skill as a known limitation.
+The one thing that doesnt scale well is the 6-layer answer pattern in `segment_concentration`  it was calibrated for a hotel with a limited market code set. A 500-room conference hotel with 25 market codes would need a different breakdown structure. We flagged this in the skill as a known limitation.
 
 OTB questions → `otb_position`. Pickup questions → `pickup_and_pace`. Mix questions → `segment_concentration`. Channel → `channel_dependency`. Group → `group_block_management` + `concentration_risk`. Historical → `point_in_time`.
 
@@ -224,9 +221,9 @@ All numeric thresholds in the skills are industry-consensus heuristics calibrate
 
 After deploying to Render and running a full evaluation through LangSmith, I found two problems that werent visible from local testing.
 
-The first was context accumulation. The evaluation script was running all 20 test questions on the same LangGraph thread. By question 10 the agent was seeing 41 messages of prior conversation before answering — which meant tokens were growing from 24k on question 1 to 226k on the morning briefing question. The fix was simple: each eval question now gets its own thread via `make_config(f"eval-{idx}")`. In the Chainlit UI each browser session already gets its own thread, so followup questions like "what about August?" still retain context within a session, but a new login starts fresh.
+The first was context accumulation. The evaluation script was running all 20 test questions on the same LangGraph thread. By question 10 the agent was seeing 41 messages of prior conversation before answering which meant tokens were growing from 24k on question 1 to 226k on the morning briefing question. The fix was simple: each eval question now gets its own thread via `make_config(f"eval-{idx}")`. In the Chainlit UI each browser session already gets its own thread, so followup questions like "what about August?" still retain context within a session, but a new login starts fresh.
 
-The second problem was worse and took longer to find. The Deep Agents task planner was spinning up a subagent task layer for almost every question — even simple single-tool ones like "which companies contribute most revenue?" That question only needs `get_top_companies` — one tool call. But the trace showed: AI writes task description → task agent executes tools → task result returned → main AI synthesizes. That's 3 LLM calls for a one-tool question, which is why segment mix questions were hitting 40-53k tokens when they should be 3-10k.
+The second problem was worse and took longer to find. The Deep Agents task planner was spinning up a subagent task layer for almost every question  even simple single-tool ones like "which companies contribute most revenue?" That question only needs `get_top_companies`  one tool call. But the trace showed: AI writes task description → task agent executes tools → task result returned → main AI synthesizes. That's 3 LLM calls for a one-tool question, which is why segment mix questions were hitting 40-53k tokens when they should be 3-10k.
 
 The fix was to change the system prompt from vague delegation rules to a specific routing table:
 
@@ -238,19 +235,8 @@ The fix was to change the system prompt from vague delegation rules to a specifi
 ```
 
 And the key instruction: "Call tools DIRECTLY. Do NOT delegate to subagents except for morning briefing." The subagents are now reserved only for morning briefings where true parallel analysis is needed. Everything else the supervisor handles directly.
-
-Results after optimisation, measured across 20 eval questions:
-
-| Question type | Before | After | Target |
-|---|---|---|---|
-| Segment mix | 40-53k tokens, 60-75s | 24-25k tokens, 14-18s | 3-10k tokens |
-| Pickup analysis | 40-60k tokens, 60s+ | 23-24k tokens, 10-15s | 5-15k tokens |
-| OTB summary | 24k tokens, 20s | 24k tokens, 11-20s | 2-8k tokens |
-| Morning briefing | 226k tokens, 100s+ | 55k tokens, 58s | 10-25k tokens |
-
-20/20 passing. Average latency dropped from 57.5s to 24.1s. Still some overhead from the skill loading system prompt which adds a fixed ~20k tokens per call — thats a Deep Agents framework cost, not something we can optimise without changing the framework.
-
-The morning briefing is still 58s because it genuinely uses both subagents and does multiple tool calls. That's acceptable — a morning briefing is a complex question that deserves a thorough answer.
+ Average latency dropped from 57.5s to 24.1s. Still some overhead from the skill loading system prompt which adds a fixed ~20k tokens per call  thats a Deep Agents framework cost, not something we can optimise without changing the framework.
+The morning briefing is still 58s because it genuinely uses both subagents and does multiple tool calls. That's acceptable a morning briefing is a complex question that deserves a thorough answer.
 
 ---
 

@@ -21,9 +21,7 @@ import sys
 from datetime import datetime, timezone
 from typing import Any
 
-DEFAULT_DATABASE_URL = (
-    "postgresql://hackathon:hackathon@localhost:5432/hotel_hackathon"
-)
+DEFAULT_DATABASE_URL = os.environ["DATABASE_URL"]
 
 TABLES = [
     "reservations_hackathon",
