@@ -19,8 +19,7 @@ from tools import (
     ALL_TOOLS,
 )
 
-DB_CONN = os.environ.get("DATABASE_URL",
-    "postgresql://neondb_owner:npg_frN6GqcsOBi9@ep-noisy-frost-abppfjnj.eu-west-2.aws.neon.tech/neondb?sslmode=require")
+DB_CONN = os.environ["DATABASE_URL"]
 
 CURRENT_MONTH = "2026-07"
 LAST_YEAR_MONTH = "2025-07"
