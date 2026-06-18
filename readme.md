@@ -83,7 +83,6 @@ row hash, and posted-row count for cross-checking against `etl/LOAD_PROOF.json`.
 ├── .env.example
 ├── ARCHITECTURE.md          # Skill→tool routing matrix
 ├── ATTESTATION.md           # Phase 0 comprehension prompts
-├── ENGINEERING_DECISIONS.md # Design choices with rationale
 ├── REQUIRED_TOOLS.md        # Tool spec
 ├── SUBMISSION.md            # Submission checklist
 ├── README.md                # This file
