@@ -63,57 +63,7 @@ row hash, and posted-row count for cross-checking against `etl/LOAD_PROOF.json`.
 
 ---
 
-## Repo layout
 
-```
-.
-├── agent.py                 # Deep Agent assembly
-├── app.py                   # Chainlit UI
-├── tools.py                 # 5 required + 2 bonus tools
-├── etl.py                   # Playwright scraper
-├── schema.sql               # Tables
-├── seed.sql                 # Seed lookups (reference page)
-├── docker-compose.yml       # Local Postgres
-├── health_server.py         # /health endpoint (FastAPI)
-├── start.sh                 # Production entrypoint
-├── requirements.txt
-├── nixpacks.toml            # Railway build config
-├── railway.json
-├── Procfile
-├── .env.example
-├── ARCHITECTURE.md          # Skill→tool routing matrix
-├── ATTESTATION.md           # Phase 0 comprehension prompts
-├── REQUIRED_TOOLS.md        # Tool spec
-├── SUBMISSION.md            # Submission checklist
-├── README.md                # This file
-├── etl/
-│   ├── SCRAPE_MANIFEST.json
-│   └── LOAD_PROOF.json
-├── scripts/
-│   └── compute_load_fingerprint.py
-├── memory/
-│   └── AGENTS.md            # Long-term agent memory
-├── skills/                  # 10 SKILL.md files
-│   ├── otb_position.md
-│   ├── pickup_and_pace.md
-│   ├── segment_concentration.md
-│   ├── channel_dependency.md
-│   ├── concentration_risk.md
-│   ├── cancellation_patterns.md
-│   ├── group_block_management.md
-│   ├── rate_integrity.md
-│   ├── point_in_time.md
-│   └── CHALLENGE_SKILL.md
-├── tools/
-│   └── METRIC_DEFINITIONS.md
-├── sql/
-│   └── VIEWS.example.sql
-└── tests/
-    ├── test_etl.py          (3+ cases)
-    ├── test_tools.py        (20 cases)
-    ├── test_skills.py       (5+ cases)
-    └── test_agent.py        (4+ cases)
-```
 
 ---
 
